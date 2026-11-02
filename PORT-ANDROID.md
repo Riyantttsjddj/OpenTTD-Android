@@ -44,12 +44,21 @@ OpenTTD sendiri adalah GNU GPL v2; seluruh source di sini mengikuti lisensi itu.
 ### 1. Perbaikan bug crash saat peluncuran kedua
 
 Bug: membuka aplikasi untuk kedua kalinya (setelah ditutup) bisa langsung
-crash. Penyebabnya entry point native keluar dengan cara yang tidak dikenali
-runtime Android ketika aplikasi di-restart.
+crash, lalu baru normal pada buka ketiga. Penyebabnya entry point native
+keluar dengan `std::_Exit()`: proses dibunuh sebelum Java glue SDL sempat
+memanggil `finish()` pada activity, sehingga Android menyimpan instance state
+yang setengah jadi dan membawanya ke peluncuran berikutnya.
 
-Perbaikan (`src/os/android/android_main.cpp`): proses keluar memakai
-`std::_Exit(status)` yang menghentikan proses secara pasti, sehingga state lama
-tidak membawa program ke kondisi tidak valid saat di-restart.
+Perbaikan:
+- `src/os/android/android_main.cpp`: `SDL_main` kini *return* normal setelah
+  `openttd_main()` selesai. Return membuat `SDLMain.run()` di sisi Java
+  menyelesaikan `finish()`-nya sehingga activity ditutup dengan bersih dan
+  instance state tidak terkotori.
+- `apk/java/org/openttd/android/OpenTTD.java`: menambah `onDestroy()` yang
+  memanggil `killProcess()` hanya ketika activity benar-benar berakhir
+  (`isFinishing()`), bukan pada rotasi. Dengan begitu proses dipastikan mati
+  tepat setelah activity dibersihkan, dan peluncuran berikutnya dimulai dari
+  proses bersih.
 
 ### 2. Identitas aplikasi tanpa label "unofficial"
 
