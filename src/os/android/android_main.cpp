@@ -51,21 +51,18 @@ extern "C" int SDL_main(int argc, char *argv[])
 	int status = openttd_main(params);
 
 	/* openttd_main() has run to completion, which on Android means the user
-	 * chose to leave the game. Unlike a desktop build, this is not a process
-	 * boundary: returning from SDL_main only stops the SDL thread, the
-	 * process (and OpenTTD's global state, its sound subsystem, its window,
-	 * and the asset manager it holds) keeps living underneath the launcher.
-	 * A second SDL_main() -- which is what launch the next time produces,
-	 * since the activity is never torn down -- would then restart the game
-	 * inside that half-finished process feared to be running twice and
-	 * crash on stale state.
+	 * chose to leave the game.  Return normally rather than ending the process
+	 * here: returning lets SDL's Java glue finish what it is in the middle of.
+	 * SDLMain.run() on the Java side waits for this function and then closes
+	 * the activity the way Android expects (finish(), which runs onDestroy() and
+	 * lets the activity be torn down cleanly instead of the process being
+	 * killed out from under it).  Killing the process from here -- which an
+	 * earlier revision did with std::_Exit() -- leaves the activity half-finished,
+	 * so Android carries a stale instance state into the next launch and the
+	 * game force-closes on that second start until a further launch clears it.
 	 *
-	 * Ending the process here makes the next launch start a fresh, clean
-	 * process, which is exactly the first-launch path that is known to work.
-	 * SDL's own comment in nativeRunMain() -- "Do not issue an exit or the
-	 * whole application will terminate" -- is about the SDL thread returning
-	 * while the app is merely paused or backgrounded, not about this
-	 * terminal quit. We are done with the app, so the whole process is the
-	 * right thing to terminate. */
-	std::_Exit(status);
+	 * The Java activity is responsible for making sure the process actually
+	 * ends once the activity is finished (see OpenTTD.onDestroy()); returning
+	 * normally from SDL_main is what lets it do that at the right moment. */
+	return status;
 }

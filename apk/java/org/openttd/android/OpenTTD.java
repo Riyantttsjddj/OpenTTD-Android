@@ -77,6 +77,35 @@ public class OpenTTD extends SDLActivity {
         super.onCreate(savedInstanceState);
     }
 
+    /**
+     * Make sure the process ends once the user has actually left the game.
+     *
+     * The native SDL_main() returns when the player quits, which makes SDL's
+     * Java glue finish() this activity the way Android expects.  That produces
+     * this callback, where the activity can be torn down cleanly before the
+     * process goes away.
+     *
+     * Killing the process here -- and only here, and only when the activity is
+     * really finishing -- is what prevents the next launch from starting inside
+     * a half-torn-down process.  Returning normally from SDL_main without
+     * ending the process lets Android keep the process alive in the background
+     * (for a fast cold start), and a second SDL_main() in that process would
+     * restart the game on top of leftover state — the sound subsystem, the
+     * window, and the asset manager that the first game left behind.  So end
+     * the process explicitly once the activity is finished.
+     *
+     * isFinishing() distinguishes a real quit from a configuration change:
+     * during a rotation the activity is recreated without finishing, and
+     * killing the process there would drop the game the user is still playing.
+     */
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (isFinishing()) {
+            android.os.Process.killProcess(android.os.Process.myPid());
+        }
+    }
+
     @Override
     protected String[] getArguments() {
         /* Runs on the thread that is about to call SDL_main(), so this is the
