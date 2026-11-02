@@ -35,8 +35,8 @@ for f in openttd.grf orig_extra.grf opntitle.dat openttd.32.bmp \
 done
 
 echo "== OpenGFX (or the game has no graphics at all)"
-cp "$SETS"/opengfx-7.1/opengfx-7.1/opengfx.obg "$GAME/baseset/"
-cp "$SETS"/opengfx-7.1/opengfx-7.1/*.grf         "$GAME/baseset/"
+cp "$SETS"/opengfx-8.0/opengfx-8.0/opengfx.obg "$GAME/baseset/"
+cp "$SETS"/opengfx-8.0/opengfx-8.0/*.grf         "$GAME/baseset/"
 
 echo "== OpenSFX (sound effects)"
 cp "$SETS"/opensfx-1.0.3/opensfx-1.0.3/opensfx.obs "$GAME/baseset/"
@@ -61,8 +61,8 @@ echo "== licences and provenance"
 cp "$BUILD/openttd/COPYING.md"  "$GAME/docs/COPYING.md"
 cp "$BUILD/openttd/README.md"   "$GAME/docs/README.md"
 cp "$BUILD/openttd/CREDITS.md"  "$GAME/docs/CREDITS.md"
-cp "$SETS"/opengfx-7.1/opengfx-7.1/license.txt    "$GAME/docs/OpenGFX-license.txt"
-cp "$SETS"/opengfx-7.1/opengfx-7.1/readme.txt     "$GAME/docs/OpenGFX-readme.txt"
+cp "$SETS"/opengfx-8.0/opengfx-8.0/license.txt    "$GAME/docs/OpenGFX-license.txt"
+cp "$SETS"/opengfx-8.0/opengfx-8.0/readme.txt     "$GAME/docs/OpenGFX-readme.txt"
 cp "$SETS"/opensfx-1.0.3/opensfx-1.0.3/license.txt "$GAME/docs/OpenSFX-license.txt"
 cp "$SETS"/opensfx-1.0.3/opensfx-1.0.3/readme.txt  "$GAME/docs/OpenSFX-readme.txt"
 cp "$SETS"/openmsx-0.4.2/openmsx-0.4.2/license.txt "$GAME/docs/OpenMSX-license.txt"

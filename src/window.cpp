@@ -2074,11 +2074,13 @@ static void EnsureVisibleCaption(Window *w, int nx, int ny)
 	if (caption != nullptr) {
 		const Rect caption_rect = caption->GetCurrentRect();
 
-		const int min_visible = caption_rect.Height();
-
-		/* Make sure the window doesn't leave the screen */
-		nx = Clamp(nx, min_visible - caption_rect.right, _screen.width - min_visible - caption_rect.left);
-		ny = Clamp(ny, 0, _screen.height - min_visible);
+		/* Make sure the window doesn't leave the screen.  The previous clamping
+		 * of nx used the caption height as the left bound, which is smaller than
+		 * the caption width, so a window could open shifted past the left edge
+		 * and its closebox would end up off-screen.  Clamp the whole window to
+		 * the screen bounds so the closebox is always visible. */
+		nx = Clamp(nx, 0, std::max(0, _screen.width  - w->width));
+		ny = Clamp(ny, 0, std::max(0, _screen.height - w->height));
 
 		/* Make sure the title bar isn't hidden behind the main tool bar or the status bar. */
 		PreventHiding(&nx, &ny, caption_rect, FindWindowById(WindowClass::MainToolbar, 0), w->left, PreventHideDirection::Down);

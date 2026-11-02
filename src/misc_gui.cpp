@@ -692,6 +692,12 @@ void GuiShowTooltips(Window *parent, EncodedString &&text, TooltipCloseCondition
 
 	if (text.empty() || !_cursor.in_window) return;
 
+	/* A dropdown menu is open and occupies the space below the toolbar button
+	 * that spawned it.  A tooltip shown for a button in that same area would be
+	 * drawn on top of the dropdown and cover its options, so suppress the tooltip
+	 * for as long as a dropdown is open. */
+	if (FindWindowById(WindowClass::DropdownMenu, 0) != nullptr) return;
+
 	new TooltipsWindow(parent, std::move(text), close_tooltip);
 }
 
