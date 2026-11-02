@@ -75,6 +75,13 @@ public class OpenTTD extends SDLActivity {
         preparation = new Thread(this::prepareStorage, "OpenTTDPrepare");
         preparation.start();
         super.onCreate(savedInstanceState);
+
+        /* The game runs fullscreen, so hide the status and navigation bars
+         * right away.  SDLActivity starts windowed (setWindowStyle(false)) and
+         * only enters immersive mode once the native window is created
+         * fullscreen; turning it on here avoids a flash of the system bars at
+         * launch. */
+        SDLActivity.setWindowStyle(true);
     }
 
     /**

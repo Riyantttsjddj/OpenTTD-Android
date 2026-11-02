@@ -666,6 +666,20 @@ int openttd_main(std::span<std::string_view> arguments)
 
 	LoadFromConfig(true);
 
+#if defined(__ANDROID__)
+	/* This is an Android port: the game must run in fullscreen, and its
+	 * settings must always be saved to disk.  On desktop _save_config only
+	 * becomes true after the initial NewGRF scan (see OnNewGRFsScanned);
+	 * forcing it here means a setting change is written the moment the user
+	 * makes it, even if that scan never runs or the process is killed before
+	 * the normal quit path (which is what Android does when the user leaves
+	 * the activity).  Setting _fullscreen now, after the config was loaded
+	 * and before the video driver is selected, makes the window be created
+	 * fullscreen (and drives Android's immersive mode) on every boot. */
+	_save_config = true;
+	_fullscreen = true;
+#endif
+
 	if (resolution.width != 0) _cur_resolution = resolution;
 
 	/* Limit width times height times bytes per pixel to fit a 32 bit
