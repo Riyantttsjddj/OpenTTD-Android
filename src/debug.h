@@ -1,0 +1,123 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file debug.h Functions related to debugging. */
+
+#ifndef DEBUG_H
+#define DEBUG_H
+
+#include <chrono>
+#include "debug_type.h"
+#include "core/enum_type.hpp"
+#include "core/format.hpp"
+
+/**
+ * Test if debug severity is visible for the given facility.
+ * @param facility The debug facility.
+ * @param severity The debug severity.
+ * @return \c true iff the debug severity level for the facility is visible.
+ */
+inline bool IsVisibleSeverity(Facility facility, Severity severity)
+{
+	extern EnumIndexArray<Severity, Facility, Facility::End> _debug_level;
+	return _debug_level[facility] >= severity;
+}
+
+/**
+ * Output a line of debugging information.
+ * @param facility The debug facility.
+ * @param severity The maximum debug level this message should be shown at. When the debug level for this category is set lower, then the message will not be shown.
+ * @param format_string The formatting string of the message.
+ */
+#define Debug(facility, severity, format_string, ...) do { if ((severity) == Severity::Critical || IsVisibleSeverity((facility), (severity))) DebugPrint(facility, severity, fmt::format(FMT_STRING(format_string) __VA_OPT__(,) __VA_ARGS__)); } while (false)
+void DebugPrint(Facility facility, Severity severity, std::string &&message);
+
+void DumpDebugFacilityNames(std::back_insert_iterator<std::string> &output_iterator);
+using SetDebugStringErrorFunc = void(std::string_view);
+void SetDebugString(std::string_view s, SetDebugStringErrorFunc error_func);
+std::string GetDebugString();
+
+/** TicToc profiling.
+ * Usage for max_count based output:
+ * static TicToc::State state("A name", 1);
+ * TicToc tt(state);
+ * --Do your code--
+ *
+ * Usage for per-tick output:
+ * static TicToc::State state("A name");
+ * TicToc tt(state);
+ * --Do your code--
+ */
+struct TicToc {
+	/** Persistent state for TicToc profiling. */
+	struct State {
+		const std::string_view name;
+		const std::optional<uint32_t> max_count;
+		uint32_t count = 0;
+		uint64_t chrono_sum = 0;
+
+		using States = std::vector<State *>;
+
+		State(std::string_view name, std::optional<uint32_t> max_count = {}) : name(name), max_count(max_count)
+		{
+			GetStates().push_back(this);
+		}
+
+		/** Remove ourselves from the thread local states. */
+		~State()
+		{
+			/* Container might be already destroyed. */
+			if (!GetStates().empty()) std::erase(GetStates(), this);
+		}
+
+		static States &GetStates()
+		{
+			thread_local static States s_states;
+			return s_states;
+		}
+
+		void OutputAndReset(const std::string_view prefix = "")
+		{
+			Debug(Facility::Misc, Severity::Critical, "[{}] [{}] {} calls in {} us [avg: {:.1f} us]", prefix, this->name, this->count, this->chrono_sum, this->chrono_sum / static_cast<double>(this->count));
+			this->count = 0;
+			this->chrono_sum = 0;
+		}
+	};
+
+	State &state;
+	std::chrono::high_resolution_clock::time_point chrono_start; ///< real time count.
+
+	inline TicToc(State &state) : state(state), chrono_start(std::chrono::high_resolution_clock::now()) { }
+
+	/** Update the state with the time since the constructor call. */
+	inline ~TicToc()
+	{
+		this->state.chrono_sum += (std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - this->chrono_start)).count();
+		this->state.count++;
+		if (this->state.max_count.has_value() && this->state.count == this->state.max_count.value()) {
+			this->state.OutputAndReset("MaxCount");
+		}
+	}
+
+	static void Tick(const std::string_view prefix)
+	{
+		for (auto state : State::GetStates()) {
+			if (state->max_count.has_value() || state->count == 0) continue;
+			state->OutputAndReset(prefix);
+		}
+	}
+};
+
+void ShowInfoI(std::string_view str);
+#define ShowInfo(format_string, ...) ShowInfoI(fmt::format(FMT_STRING(format_string) __VA_OPT__(,) __VA_ARGS__))
+
+std::string GetLogPrefix(bool force = false);
+
+void DebugSendRemoteMessages();
+void DebugReconsiderSendRemoteMessages();
+
+#endif /* DEBUG_H */

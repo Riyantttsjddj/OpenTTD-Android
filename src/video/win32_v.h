@@ -1,0 +1,198 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file win32_v.h Base of the Windows video driver. */
+
+#ifndef VIDEO_WIN32_H
+#define VIDEO_WIN32_H
+
+#include "video_driver.hpp"
+#include <windows.h>
+
+/** Base class for Windows video drivers. */
+class VideoDriver_Win32Base : public VideoDriver {
+public:
+	/**
+	 * Create the video driver.
+	 * @param uses_hardware_acceleration Whether hardware acceleration is used by this driver.
+	 * @param supports_animation_buffer Whether this driver supports a hardware accelerated animation buffer.
+	 */
+	VideoDriver_Win32Base(bool uses_hardware_acceleration = false, bool supports_animation_buffer = false) :
+			VideoDriver(uses_hardware_acceleration, supports_animation_buffer) {}
+
+	void Stop() override;
+
+	void MakeDirty(int left, int top, int width, int height) override;
+
+	void MainLoop() override;
+
+	bool ChangeResolution(int w, int h) override;
+
+	bool ToggleFullscreen(bool fullscreen) override;
+
+	void ClaimMousePointer() override;
+
+	void EditBoxLostFocus() override;
+
+	std::vector<int> GetListOfMonitorRefreshRates() override;
+
+protected:
+	HWND main_wnd = nullptr; ///< Handle to system window.
+	bool fullscreen = false; ///< Whether to use (true) fullscreen mode.
+	bool has_focus = false; ///< Does our window have system focus?
+	Rect dirty_rect;        ///< Region of the screen that needs redrawing.
+	int width = 0;          ///< Width in pixels of our display surface.
+	int height = 0;         ///< Height in pixels of our display surface.
+	int width_org = 0;      ///< Original monitor resolution width, before we changed it.
+	int height_org = 0;     ///< Original monitor resolution height, before we changed it.
+
+	bool buffer_locked = false; ///< Video buffer was locked by the main thread.
+	Palette local_palette; ///< Current palette to use for drawing.
+
+	Dimension GetScreenSize() const override;
+	void InputLoop() override;
+	bool LockVideoBuffer() override;
+	void UnlockVideoBuffer() override;
+	void CheckPaletteAnim() override;
+	bool PollEvent() override;
+
+	std::optional<std::string_view> Initialize();
+	bool MakeWindow(bool full_screen, bool resize = true);
+	void ClientSizeChanged(int w, int h, bool force = false);
+
+	virtual uint8_t GetFullscreenBpp();
+
+	/**
+	 * (Re-)create the backing store.
+	 * @param w The width of the window.
+	 * @param h The height of the window.
+	 * @param force Whether to force full reallocation, instead of not reallocating when size did not change.
+	 * @return Whether the backing store was (re-)created.
+	 */
+	virtual bool AllocateBackingStore(int w, int h, bool force = false) = 0;
+
+	/**
+	 * Get a pointer to the video buffer.
+	 * @return The pointer.
+	 */
+	virtual void *GetVideoPointer() = 0;
+
+	/** Hand video buffer back to the painting backend. */
+	virtual void ReleaseVideoPointer() {}
+
+	/**
+	 * Palette of the window has changed.
+	 * @param hWnd The window handle of the changed window.
+	 */
+	virtual void PaletteChanged(HWND hWnd) = 0;
+
+	/**
+	 * Whether minimising and restoring fullscreen windows uses ToggleFullscreen.
+	 * @return True if ToggleFullscreen should be used.
+	 */
+	virtual bool MinimiseRestoreWithToggleFullscreen() const { return false; }
+
+private:
+	friend LRESULT CALLBACK WndProcGdi(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+};
+/** The GDI video driver for windows. */
+class VideoDriver_Win32GDI : public VideoDriver_Win32Base {
+public:
+	std::optional<std::string_view> Start(const StringList &param) override;
+
+	void Stop() override;
+
+	bool AfterBlitterChange() override;
+
+	std::string_view GetName() const override { return "win32"; }
+
+protected:
+	HBITMAP dib_sect = nullptr; ///< System bitmap object referencing our rendering buffer.
+	HPALETTE gdi_palette = nullptr; ///< Palette object for 8bpp blitter.
+	void *buffer_bits = nullptr;  ///< Internal rendering buffer.
+
+	void Paint() override;
+	void *GetVideoPointer() override { return this->buffer_bits; }
+
+	bool AllocateBackingStore(int w, int h, bool force = false) override;
+	void PaletteChanged(HWND hWnd) override;
+	void MakePalette();
+	void UpdatePalette(HDC dc, uint start, uint count);
+
+#ifdef _DEBUG
+public:
+	static int RedrawScreenDebug();
+#endif
+};
+
+/** The factory for Windows' video driver. */
+class FVideoDriver_Win32GDI : public DriverFactoryBase {
+public:
+	FVideoDriver_Win32GDI() : DriverFactoryBase(Driver::Type::Video, 8, "win32", "Win32 GDI Video Driver") {}
+	std::unique_ptr<Driver> CreateInstance() const override { return std::make_unique<VideoDriver_Win32GDI>(); }
+};
+
+#ifdef WITH_OPENGL
+
+/** The OpenGL video driver for windows. */
+class VideoDriver_Win32OpenGL : public VideoDriver_Win32Base {
+public:
+	VideoDriver_Win32OpenGL() : VideoDriver_Win32Base(true, true), driver_info(this->GetName()) {}
+
+	std::optional<std::string_view> Start(const StringList &param) override;
+
+	void Stop() override;
+
+	bool ToggleFullscreen(bool fullscreen) override;
+
+	bool AfterBlitterChange() override;
+
+	bool HasEfficient8Bpp() const override { return true; }
+
+	bool UseSystemCursor() override { return true; }
+
+	void PopulateSystemSprites() override;
+
+	void ClearSystemSprites() override;
+
+	void ToggleVsync(bool vsync) override;
+
+	std::string_view GetName() const override { return "win32-opengl"; }
+
+	std::string_view GetInfoString() const override { return this->driver_info; }
+
+protected:
+	HDC dc = nullptr; ///< Window device context.
+	HGLRC gl_rc = nullptr; ///< OpenGL context.
+	std::string driver_info; ///< Information string about selected driver.
+
+	uint8_t GetFullscreenBpp() override { return 32; } // OpenGL is always 32 bpp.
+
+	void Paint() override;
+
+	bool AllocateBackingStore(int w, int h, bool force = false) override;
+	void *GetVideoPointer() override;
+	void ReleaseVideoPointer() override;
+	void PaletteChanged(HWND) override {}
+
+	std::optional<std::string_view> AllocateContext();
+	void DestroyContext();
+};
+
+/** The factory for Windows' OpenGL video driver. */
+class FVideoDriver_Win32OpenGL : public DriverFactoryBase {
+public:
+	FVideoDriver_Win32OpenGL() : DriverFactoryBase(Driver::Type::Video, 9, "win32-opengl", "Win32 OpenGL Video Driver") {}
+	std::unique_ptr<Driver> CreateInstance() const override { return std::make_unique<VideoDriver_Win32OpenGL>(); }
+
+protected:
+	bool UsesHardwareAcceleration() const override { return true; }
+};
+
+#endif /* WITH_OPENGL */
+
+#endif /* VIDEO_WIN32_H */

@@ -1,0 +1,371 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file script_story_page.hpp Everything to manipulate a story page. */
+
+#ifndef SCRIPT_STORY_PAGE_HPP
+#define SCRIPT_STORY_PAGE_HPP
+
+#include "script_company.hpp"
+#include "script_date.hpp"
+#include "script_vehicle.hpp"
+#include "../../story_type.h"
+#include "../../story_base.h"
+
+/**
+ * Class that handles story page related functions.
+ *
+ * To create a page:
+ * 1. Create the page
+ * 2. Create page elements that will be appended to the page in the order which they are created.
+ *
+ * Pages can be either global or company specific. It is possible to mix, but the only mixed solution
+ * that will work is to have all global pages first. Once you create the first company specific page,
+ * it is not recommended to add additional global pages unless you clear up all pages first.
+ *
+ * Page elements are stacked vertically on a page. If goal elements are used, the element will
+ * become empty if the goal is removed while the page still exist. Instead of removing the goal,
+ * you can mark it as complete and the Story Book will show that the goal is completed.
+ *
+ * Mind that users might want to go back to old pages later on. Thus do not remove pages in
+ * the story book unless you really need to.
+ *
+ * @api game
+ */
+class ScriptStoryPage : public ScriptObject {
+public:
+	static constexpr StoryPageID STORY_PAGE_INVALID = ::StoryPageID::Invalid(); ///< An invalid story page id.
+	static constexpr StoryPageElementID STORY_PAGE_ELEMENT_INVALID = ::StoryPageElementID::Invalid(); ///< An invalid story page element id.
+
+	/**
+	 * Story page element types.
+	 */
+	enum StoryPageElementType : uint8_t {
+		SPET_TEXT = ::to_underlying(::StoryPageElementType::Text), ///< An element that displays a block of text.
+		SPET_LOCATION = ::to_underlying(::StoryPageElementType::Location), ///< An element that displays a single line of text along with a button to view the referenced location.
+		SPET_GOAL = ::to_underlying(::StoryPageElementType::Goal), ///< An element that displays a goal.
+		SPET_BUTTON_PUSH = ::to_underlying(::StoryPageElementType::ButtonPush), ///< A push button that triggers an immediate event.
+		SPET_BUTTON_TILE = ::to_underlying(::StoryPageElementType::ButtonTile), ///< A button that allows the player to select a tile, and triggers an event with the tile.
+		SPET_BUTTON_VEHICLE = ::to_underlying(::StoryPageElementType::ButtonVehicle), ///< A button that allows the player to select a vehicle, and triggers an event with the vehicle.
+	};
+
+	/**
+	 * Formatting data for button page elements.
+	 */
+	typedef uint32_t StoryPageButtonFormatting;
+
+	/**
+	 * Formatting and layout flags for story page buttons.
+	 * The SPBF_FLOAT_LEFT and SPBF_FLOAT_RIGHT flags can not be combined.
+	 */
+	enum StoryPageButtonFlags : uint8_t {
+		SPBF_NONE = ::StoryPageButtonFlags{}.base(), ///< No special formatting for button.
+		SPBF_FLOAT_LEFT = ::StoryPageButtonFlags{StoryPageButtonFlag::FloatLeft}.base(), ///< Button is placed to the left of the following paragraph.
+		SPBF_FLOAT_RIGHT = ::StoryPageButtonFlags{StoryPageButtonFlag::FloatRight}.base(), ///< Button is placed to the right of the following paragraph.
+	};
+
+	/**
+	 * Mouse cursors usable by story page buttons.
+	 */
+	enum StoryPageButtonCursor : uint8_t {
+		SPBC_MOUSE = to_underlying(::StoryPageButtonCursor::Mouse),
+		SPBC_ZZZ = to_underlying(::StoryPageButtonCursor::Zzz),
+		SPBC_BUOY = to_underlying(::StoryPageButtonCursor::Buoy),
+		SPBC_QUERY = to_underlying(::StoryPageButtonCursor::Query),
+		SPBC_HQ = to_underlying(::StoryPageButtonCursor::HQ),
+		SPBC_SHIP_DEPOT = to_underlying(::StoryPageButtonCursor::ShipDepot),
+		SPBC_SIGN = to_underlying(::StoryPageButtonCursor::Sign),
+		SPBC_TREE = to_underlying(::StoryPageButtonCursor::Tree),
+		SPBC_BUY_LAND = to_underlying(::StoryPageButtonCursor::BuyLand),
+		SPBC_LEVEL_LAND = to_underlying(::StoryPageButtonCursor::LevelLand),
+		SPBC_TOWN = to_underlying(::StoryPageButtonCursor::Town),
+		SPBC_INDUSTRY = to_underlying(::StoryPageButtonCursor::Industry),
+		SPBC_ROCKY_AREA = to_underlying(::StoryPageButtonCursor::RockyArea),
+		SPBC_DESERT = to_underlying(::StoryPageButtonCursor::Desert),
+		SPBC_TRANSMITTER = to_underlying(::StoryPageButtonCursor::Transmitter),
+		SPBC_AIRPORT = to_underlying(::StoryPageButtonCursor::Airport),
+		SPBC_DOCK = to_underlying(::StoryPageButtonCursor::Dock),
+		SPBC_CANAL = to_underlying(::StoryPageButtonCursor::Canal),
+		SPBC_LOCK = to_underlying(::StoryPageButtonCursor::Lock),
+		SPBC_RIVER = to_underlying(::StoryPageButtonCursor::River),
+		SPBC_AQUEDUCT = to_underlying(::StoryPageButtonCursor::Aqueduct),
+		SPBC_BRIDGE = to_underlying(::StoryPageButtonCursor::Bridge),
+		SPBC_RAIL_STATION = to_underlying(::StoryPageButtonCursor::RailStation),
+		SPBC_TUNNEL_RAIL = to_underlying(::StoryPageButtonCursor::TunnelRail),
+		SPBC_TUNNEL_ELRAIL = to_underlying(::StoryPageButtonCursor::TunnelElrail),
+		SPBC_TUNNEL_MONO = to_underlying(::StoryPageButtonCursor::TunnelMono),
+		SPBC_TUNNEL_MAGLEV = to_underlying(::StoryPageButtonCursor::TunnelMaglev),
+		SPBC_AUTORAIL = to_underlying(::StoryPageButtonCursor::AutoRail),
+		SPBC_AUTOELRAIL = to_underlying(::StoryPageButtonCursor::AutoElrail),
+		SPBC_AUTOMONO = to_underlying(::StoryPageButtonCursor::AutoMono),
+		SPBC_AUTOMAGLEV = to_underlying(::StoryPageButtonCursor::AutoMaglev),
+		SPBC_WAYPOINT = to_underlying(::StoryPageButtonCursor::Waypoint),
+		SPBC_RAIL_DEPOT = to_underlying(::StoryPageButtonCursor::RailDepot),
+		SPBC_ELRAIL_DEPOT = to_underlying(::StoryPageButtonCursor::ElrailDepot),
+		SPBC_MONO_DEPOT = to_underlying(::StoryPageButtonCursor::MonoDepot),
+		SPBC_MAGLEV_DEPOT = to_underlying(::StoryPageButtonCursor::MaglevDepot),
+		SPBC_CONVERT_RAIL = to_underlying(::StoryPageButtonCursor::ConvertRail),
+		SPBC_CONVERT_ELRAIL = to_underlying(::StoryPageButtonCursor::ConvertElrail),
+		SPBC_CONVERT_MONO = to_underlying(::StoryPageButtonCursor::ConvertMono),
+		SPBC_CONVERT_MAGLEV = to_underlying(::StoryPageButtonCursor::ConvertMaglev),
+		SPBC_AUTOROAD = to_underlying(::StoryPageButtonCursor::AutoRoad),
+		SPBC_AUTOTRAM = to_underlying(::StoryPageButtonCursor::AutoTram),
+		SPBC_ROAD_DEPOT = to_underlying(::StoryPageButtonCursor::RoadDepot),
+		SPBC_BUS_STATION = to_underlying(::StoryPageButtonCursor::BusStation),
+		SPBC_TRUCK_STATION = to_underlying(::StoryPageButtonCursor::TruckStation),
+		SPBC_ROAD_TUNNEL = to_underlying(::StoryPageButtonCursor::RoadTunnel),
+		SPBC_CLONE_TRAIN = to_underlying(::StoryPageButtonCursor::CloneTrain),
+		SPBC_CLONE_ROADVEH = to_underlying(::StoryPageButtonCursor::CloneRoadVeh),
+		SPBC_CLONE_SHIP = to_underlying(::StoryPageButtonCursor::CloneShip),
+		SPBC_CLONE_AIRPLANE = to_underlying(::StoryPageButtonCursor::CloneAirplane),
+		SPBC_DEMOLISH = to_underlying(::StoryPageButtonCursor::Demolish),
+		SPBC_LOWERLAND = to_underlying(::StoryPageButtonCursor::LowerLand),
+		SPBC_RAISELAND = to_underlying(::StoryPageButtonCursor::RaiseLand),
+		SPBC_PICKSTATION = to_underlying(::StoryPageButtonCursor::PickStation),
+		SPBC_BUILDSIGNALS = to_underlying(::StoryPageButtonCursor::BuildSignals),
+	};
+
+	/**
+	 * Colour codes usable for story page button elements.
+	 * Place a colour value in the lowest 8 bits of the \c reference parameter to the button.
+	 */
+	enum StoryPageButtonColour : uint8_t {
+		SPBC_DARK_BLUE  = to_underlying(::Colours::DarkBlue),
+		SPBC_PALE_GREEN = to_underlying(::Colours::PaleGreen),
+		SPBC_PINK       = to_underlying(::Colours::Pink),
+		SPBC_YELLOW     = to_underlying(::Colours::Yellow),
+		SPBC_RED        = to_underlying(::Colours::Red),
+		SPBC_LIGHT_BLUE = to_underlying(::Colours::LightBlue),
+		SPBC_GREEN      = to_underlying(::Colours::Green),
+		SPBC_DARK_GREEN = to_underlying(::Colours::DarkGreen),
+		SPBC_BLUE       = to_underlying(::Colours::Blue),
+		SPBC_CREAM      = to_underlying(::Colours::Cream),
+		SPBC_MAUVE      = to_underlying(::Colours::Mauve),
+		SPBC_PURPLE     = to_underlying(::Colours::Purple),
+		SPBC_ORANGE     = to_underlying(::Colours::Orange),
+		SPBC_BROWN      = to_underlying(::Colours::Brown),
+		SPBC_GREY       = to_underlying(::Colours::Grey),
+		SPBC_WHITE      = to_underlying(::Colours::White),
+	};
+
+	/**
+	 * Check whether this is a valid story page ID.
+	 * @param story_page_id The StoryPageID to check.
+	 * @return True if and only if this story page is valid.
+	 */
+	static bool IsValidStoryPage(StoryPageID story_page_id);
+
+	/**
+	 * Check whether this is a valid story page element ID.
+	 * @param story_page_element_id The StoryPageElementID to check.
+	 * @return True if and only if this story page element is valid.
+	 */
+	static bool IsValidStoryPageElement(StoryPageElementID story_page_element_id);
+
+	/**
+	 * Check whether this is a valid story page element type.
+	 * @param type The StoryPageElementType to check.
+	 * @return True if and only if this story page element type is valid.
+	 */
+	static bool IsValidStoryPageElementType(StoryPageElementType type);
+
+	/**
+	 * Create a new story page.
+	 * @param company The company to create the story page for, or ScriptCompany::COMPANY_INVALID for all.
+	 * @param title Page title (can be either a raw string, a ScriptText object, or null).
+	 * @return The new StoryPageID, or STORY_PAGE_INVALID if it failed.
+	 * @pre ScriptCompanyMode::IsDeity().
+	 * @pre company == COMPANY_INVALID || ResolveCompanyID(company) != COMPANY_INVALID.
+	 */
+	static StoryPageID New(ScriptCompany::CompanyID company, Text *title);
+
+	/**
+	 * Create a new story page element.
+	 * @param story_page_id The page id of the story page which the page element should be appended to.
+	 * @param type Which page element type to create.
+	 * @param reference A reference value to the object that is referred to by some page element types.
+	 *                  When type is SPET_GOAL, this is the goal ID.
+	 *                  When type is SPET_LOCATION, this is the TileIndex.
+	 *                  When type is a button, this is the ID returned by
+	 *                  #MakePushButtonReference, #MakeTileButtonReference, or #MakeVehicleButtonReference.
+	 * @param text The body text of page elements that allow custom text. (SPET_TEXT and SPET_LOCATION)
+	 * @return The new StoryPageElementID, or STORY_PAGE_ELEMENT_INVALID if it failed.
+	 * @pre ScriptCompanyMode::IsDeity().
+	 * @pre IsValidStoryPage(story_page).
+	 * @pre IsValidStoryPageElementType(type).
+	 * @pre (type != SPET_TEXT && type != SPET_LOCATION) || (text != null && len(text) != 0).
+	 * @pre type != SPET_LOCATION || ScriptMap::IsValidTile(reference).
+	 * @pre type != SPET_GOAL || ScriptGoal::IsValidGoal(reference).
+	 * @pre if type is SPET_GOAL and story_page is a global page, then referenced goal must be global.
+	 */
+	static StoryPageElementID NewElement(StoryPageID story_page_id, StoryPageElementType type, SQInteger reference, Text *text);
+
+	/**
+	 * Update the content of a page element
+	 * @param story_page_element_id The page id of the story page which the page element should be appended to.
+	 * @param reference A reference value to the object that is referred to by some page element types. See also NewElement.
+	 * @param text The body text of page elements that allow custom text. See also NewElement.
+	 * @return True if the action succeeded.
+	 * @pre ScriptCompanyMode::IsDeity().
+	 * @pre IsValidStoryPage(story_page).
+	 * @pre (type != SPET_TEXT && type != SPET_LOCATION) || (text != null && len(text) != 0).
+	 * @pre type != SPET_LOCATION || ScriptMap::IsValidTile(reference).
+	 * @pre type != SPET_GOAL || ScriptGoal::IsValidGoal(reference).
+	 * @pre if type is SPET_GOAL and story_page is a global page, then referenced goal must be global.
+	 */
+	static bool UpdateElement(StoryPageElementID story_page_element_id, SQInteger reference, Text *text);
+
+	/**
+	 * Get story page sort value. Each page has a sort value that is internally assigned and used
+	 * to sort the pages in the story book. OpenTTD maintains this number so that the sort order
+	 * is perceived. This API exist only so that you can sort ScriptStoryPageList the same order
+	 * as in GUI. You should not use this number for anything else.
+	 * @param story_page_id The story page to get the sort value of.
+	 * @return Page sort value.
+	 */
+	static SQInteger GetPageSortValue(StoryPageID story_page_id);
+
+	/**
+	 * Get story page element sort value. Each page element has a sort value that is internally
+	 * assigned and used to sort the page elements within a page of the story book. OpenTTD
+	 * maintains this number so that the sort order is perceived. This API exist only so that
+	 * you can sort ScriptStoryPageList the same order as in GUI. You should not use this number
+	 * for anything else.
+	 * @param story_page_element_id The story page element to get the sort value of.
+	 * @return Page element sort value.
+	 */
+	static SQInteger GetPageElementSortValue(StoryPageElementID story_page_element_id);
+
+	/**
+	 * Get the company which the page belongs to. If the page is global,
+	 * ScriptCompany::COMPANY_INVALID is returned.
+	 * @param story_page_id The story page to get the company for.
+	 * @return owner company or ScriptCompany::COMPANY_INVALID
+	 * @pre IsValidStoryPage(story_page_id).
+	 */
+	static ScriptCompany::CompanyID GetCompany(StoryPageID story_page_id);
+
+	/**
+	 * Get the page date which is displayed at the top of each page.
+	 * @param story_page_id The story page to get the date of.
+	 * @return The calendar-date
+	 * @pre IsValidStoryPage(story_page_id).
+	 * @see \ref ScriptCalendarTime
+	 */
+	static ScriptDate::Date GetDate(StoryPageID story_page_id);
+
+	/**
+	 * Update date of a story page. The date is shown in the top left of the page
+	 * @param story_page_id The story page to set the date for.
+	 * @param date Calendar-date to display at the top of story page or ScriptDate::DATE_INVALID to disable showing date on this page. (also, @see ScriptDate)
+	 * @return True if the action succeeded.
+	 * @pre ScriptCompanyMode::IsDeity().
+	 * @pre IsValidStoryPage(story_page_id).
+	 * @see \ref ScriptCalendarTime
+	 */
+	static bool SetDate(StoryPageID story_page_id, ScriptDate::Date date);
+
+	/**
+	 * Update title of a story page. The title is shown in the page selector drop down.
+	 * @param story_page_id The story page to update.
+	 * @param title Page title (can be either a raw string, a ScriptText object, or null).
+	 * @return True if the action succeeded.
+	 * @pre ScriptCompanyMode::IsDeity().
+	 * @pre IsValidStoryPage(story_page_id).
+	 */
+	static bool SetTitle(StoryPageID story_page_id, Text *title);
+
+	/**
+	 * Opens the Story Book if not yet open and selects the given page.
+	 * @param story_page_id The story page to update. If it is a global page, clients of all
+	 * companies are affected. Otherwise only the clients of the company which the page belongs
+	 * to are affected.
+	 * @return True if the action succeeded.
+	 * @pre ScriptCompanyMode::IsDeity().
+	 * @pre IsValidStoryPage(story_page_id).
+	 */
+	static bool Show(StoryPageID story_page_id);
+
+	/**
+	 * Remove a story page and all the page elements
+	 * associated with it.
+	 * @param story_page_id The story page to remove.
+	 * @return True if the action succeeded.
+	 * @pre ScriptCompanyMode::IsDeity().
+	 * @pre IsValidStoryPage(story_page_id).
+	 */
+	static bool Remove(StoryPageID story_page_id);
+
+	/**
+	 * Removes a story page element.
+	 * @param story_page_element_id The story page element to remove.
+	 * @return True if the action succeeded.
+	 * @pre ScriptCompanyMode::IsDeity().
+	 * @pre IsValidStoryPageElement(story_page_element_id).
+	 */
+	static bool RemoveElement(StoryPageElementID story_page_element_id);
+
+	/**
+	 * Check whether this is a valid story page button colour.
+	 * @param colour The StoryPageButtonColour to check.
+	 * @return True if and only if this story page button colour is valid.
+	 */
+	static bool IsValidStoryPageButtonColour(StoryPageButtonColour colour);
+
+	/**
+	 * Check whether this is a valid story page button flag.
+	 * @param flags The StoryPageButtonFlags to check.
+	 * @return True if and only if this story page button flag is valid.
+	 */
+	static bool IsValidStoryPageButtonFlags(StoryPageButtonFlags flags);
+
+	/**
+	 * Check whether this is a valid story page button cursor.
+	 * @param cursor The StoryPageButtonCursor to check.
+	 * @return True if and only if this story page button cursor is valid.
+	 */
+	static bool IsValidStoryPageButtonCursor(StoryPageButtonCursor cursor);
+
+	/**
+	 * Create a reference value for SPET_BUTTON_PUSH element parameters.
+	 * @param colour The colour for the face of the button.
+	 * @param flags The formatting and layout flags for the button.
+	 * @return A reference value usable with the #NewElement and #UpdateElement functions.
+	 * @pre IsValidStoryPageButtonColour(colour).
+	 * @pre IsValidStoryPageButtonFlags(flags).
+	 */
+	static StoryPageButtonFormatting MakePushButtonReference(StoryPageButtonColour colour, StoryPageButtonFlags flags);
+
+	/**
+	 * Create a reference value for SPET_BUTTON_TILE element parameters.
+	 * @param colour The colour for the face of the button.
+	 * @param flags The formatting and layout flags for the button.
+	 * @param cursor The mouse cursor to use when the player clicks the button and the game is ready for the player to select a tile.
+	 * @return A reference value usable with the #NewElement and #UpdateElement functions.
+	 * @pre IsValidStoryPageButtonColour(colour).
+	 * @pre IsValidStoryPageButtonFlags(flags).
+	 * @pre IsValidStoryPageButtonCursor(cursor).
+	 */
+	static StoryPageButtonFormatting MakeTileButtonReference(StoryPageButtonColour colour, StoryPageButtonFlags flags, StoryPageButtonCursor cursor);
+
+	/**
+	 * Create a reference value for SPET_BUTTON_VEHICLE element parameters.
+	 * @param colour  The colour for the face of the button.
+	 * @param flags The formatting and layout flags for the button.
+	 * @param cursor  The mouse cursor to use when the player clicks the button and the game is ready for the player to select a vehicle.
+	 * @param vehtype The type of vehicle that will be selectable, or \c VT_INVALID to allow all types.
+	 * @return A reference value usable with the #NewElement and #UpdateElement functions.
+	 * @pre IsValidStoryPageButtonColour(colour).
+	 * @pre IsValidStoryPageButtonFlags(flags).
+	 * @pre IsValidStoryPageButtonCursor(cursor).
+	 * @pre vehtype == ScriptVehicle::VT_INVALID || vehtype == ScriptVehicle::VT_RAIL || vehtype == ScriptVehicle::VT_ROAD || vehtype == ScriptVehicle::VT_WATER || vehtype == ScriptVehicle::VT_AIR.
+	 */
+	static StoryPageButtonFormatting MakeVehicleButtonReference(StoryPageButtonColour colour, StoryPageButtonFlags flags, StoryPageButtonCursor cursor, ScriptVehicle::VehicleType vehtype);
+};
+
+#endif /* SCRIPT_STORY_PAGE_HPP */
+

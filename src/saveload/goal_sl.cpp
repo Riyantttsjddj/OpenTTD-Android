@@ -1,0 +1,58 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file goal_sl.cpp Code handling saving and loading of goals. */
+
+#include "../stdafx.h"
+
+#include "saveload.h"
+#include "compat/goal_sl_compat.h"
+
+#include "../goal_base.h"
+
+#include "../safeguards.h"
+
+static const SaveLoad _goals_desc[] = {
+	SaveLoad::Variable<VarFileType::U16>("company", SLE_OBJECT_ADDRESS(Goal, company)),
+	SaveLoad::Variable<VarFileType::U16>("type", SLE_OBJECT_ADDRESS(Goal, type)),
+	SaveLoad::Variable<VarFileType::U32>("dst", SLE_OBJECT_ADDRESS(Goal, dst)),
+	SaveLoad::String("text", SLE_OBJECT_ADDRESS(Goal, text), StringValidationSetting::AllowControlCode),
+	SaveLoad::String("progress", SLE_OBJECT_ADDRESS(Goal, progress), StringValidationSetting::AllowControlCode, SaveLoadVersion::GoalProgressPlaneAcceleration),
+	SaveLoad::Variable<VarFileType::Bool>("completed", SLE_OBJECT_ADDRESS(Goal, completed), SaveLoadVersion::GoalProgressPlaneAcceleration),
+};
+
+struct GOALChunkHandler : ChunkHandler {
+	GOALChunkHandler() : ChunkHandler("GOAL", ChunkType::Table) {}
+
+	void Save() const override
+	{
+		SlTableHeader(_goals_desc);
+
+		for (Goal *s : Goal::Iterate()) {
+			SlSetArrayIndex(s->index);
+			SlObject(s, _goals_desc);
+		}
+	}
+
+	void Load() const override
+	{
+		const std::vector<SaveLoad> slt = SlCompatTableHeader(_goals_desc, _goals_sl_compat);
+
+		int index;
+		while ((index = SlIterateArray()) != -1) {
+			Goal *s = Goal::CreateAtIndex(GoalID(index));
+			SlObject(s, slt);
+		}
+	}
+};
+
+static const GOALChunkHandler GOAL;
+static const ChunkHandlerRef goal_chunk_handlers[] = {
+	GOAL,
+};
+
+extern const ChunkHandlerTable _goal_chunk_handlers(goal_chunk_handlers);

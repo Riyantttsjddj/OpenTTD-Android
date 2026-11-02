@@ -1,0 +1,196 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file packet.h Basic functions to create, fill and read packets. */
+
+#ifndef NETWORK_CORE_PACKET_H
+#define NETWORK_CORE_PACKET_H
+
+#include "config.h"
+#include "core.h"
+#include "../../core/convertible_through_base.hpp"
+#include "../../string_type.h"
+
+typedef uint16_t PacketSize; ///< Size of the whole packet.
+typedef uint8_t  PacketType; ///< Identifier for the packet
+
+/**
+ * Trait to mark an enumeration as a PacketType.
+ *
+ * All packets in the context of OpenTTD's protocols have the same basic structure.
+ * A single byte identifier of the packet and then two bytes for the length. That
+ * identifier is unique for each stream of packets, which are separate enumerations.
+ * This trait allows us to only allow one of these PacketType enumerations when
+ * creating the packet, but not any other enumeration. It is up to the developer to
+ * ensure that the right enumeration is used for a socket handler.
+ */
+template <typename enum_type>
+struct IsEnumPacketType {
+	static constexpr bool value = false; ///< True iff a PacketType.
+};
+
+/**
+ * Internal entity of a packet. As everything is sent as a packet,
+ * all network communication will need to call the functions that
+ * populate the packet.
+ * Every packet can be at most a limited number bytes set in the
+ * constructor. Overflowing this limit will give an assertion when
+ * sending (i.e. writing) the packet. Reading past the size of the
+ * packet when receiving will return all 0 values and "" in case of
+ * the string.
+ *
+ * --- Points of attention ---
+ *  - all > 1 byte integral values are written in little endian,
+ *    unless specified otherwise.
+ *      Thus, 0x01234567 would be sent as {0x67, 0x45, 0x23, 0x01}.
+ *  - all sent strings are of variable length and terminated by a '\0'.
+ *      Thus, the length of the strings is not sent.
+ *  - years that are leap years in the 'days since X' to 'date' calculations:
+ *     (year % 4 == 0) and ((year % 100 != 0) or (year % 400 == 0))
+ */
+struct Packet {
+	static constexpr size_t ENCODED_LENGTH_OF_PACKET_SIZE = sizeof(PacketSize); ///< The length of the packet size in the byte stream once it's encoded.
+	static constexpr size_t ENCODED_LENGTH_OF_PACKET_TYPE = sizeof(PacketType); ///< The length of the packet type in the byte stream once it's encoded.
+private:
+	/** The current read/write position in the packet */
+	PacketSize pos;
+	/** The buffer of this packet. */
+	std::vector<uint8_t> buffer;
+	/** The limit for the packet size. */
+	size_t limit;
+
+	/** Socket we're associated with. */
+	NetworkSocketHandler *cs;
+
+public:
+	Packet(NetworkSocketHandler *cs, size_t limit, size_t initial_read_size = Packet::ENCODED_LENGTH_OF_PACKET_SIZE);
+	Packet(NetworkSocketHandler *cs, PacketType type, size_t limit = COMPAT_MTU);
+
+	/**
+	 * Creates a packet to send
+	 * @param cs    The socket handler associated with the socket we are writing to; could be \c nullptr.
+	 * @param type  The type of the packet to send.
+	 * @param limit The maximum number of bytes the packet may have. Default is COMPAT_MTU.
+	 *              Be careful of compatibility with older clients/servers when changing
+	 *              the limit as it might break things if the other side is not expecting
+	 *              much larger packets than what they support.
+	 */
+	template <typename E, typename = std::enable_if_t<IsEnumPacketType<E>::value>>
+	Packet(NetworkSocketHandler *cs, E type, size_t limit = COMPAT_MTU) : Packet(cs, to_underlying(type), limit) {}
+
+	/* Sending/writing of packets */
+	void PrepareToSend();
+
+	bool   CanWriteToPacket(size_t bytes_to_write);
+	void   Send_bool  (bool   data);
+	void   Send_uint8 (uint8_t  data);
+	/** @copydoc Packet::Send_uint8(uint8_t) */
+	void   Send_uint8 (const ConvertibleThroughBase auto &data) { this->Send_uint8(data.base()); }
+	void   Send_uint16(uint16_t data);
+	void   Send_uint32(uint32_t data);
+	void   Send_uint64(uint64_t data);
+	void   Send_string(std::string_view data);
+	void   Send_buffer(const std::vector<uint8_t> &data);
+	std::span<const uint8_t> Send_bytes(const std::span<const uint8_t> span);
+
+	/* Reading/receiving of packets */
+	bool HasPacketSizeData() const;
+	bool ParsePacketSize();
+	size_t Size() const;
+	[[nodiscard]] bool PrepareToRead();
+	PacketType GetPacketType() const;
+
+	bool   CanReadFromPacket(size_t bytes_to_read, bool close_connection = false);
+	bool   Recv_bool  ();
+	uint8_t  Recv_uint8 ();
+	uint16_t Recv_uint16();
+	uint32_t Recv_uint32();
+	uint64_t Recv_uint64();
+	std::vector<uint8_t> Recv_buffer();
+	size_t Recv_bytes(std::span<uint8_t> span);
+	std::string Recv_string(size_t length, StringValidationSettings settings = StringValidationSetting::ReplaceWithQuestionMark);
+
+	size_t RemainingBytesToTransfer() const;
+
+	/**
+	 * Transfer data from the packet to the given function. It starts reading at the
+	 * position the last transfer stopped.
+	 * See Packet::TransferIn for more information about transferring data to functions.
+	 * @param transfer_function The function to pass span of bytes to write to.
+	 *                          It returns the amount that was written or -1 upon errors.
+	 * @param limit             The maximum amount of bytes to transfer.
+	 * @tparam F The type of the transfer_function.
+	 * @return The return value of the transfer_function.
+	 */
+	template <typename F>
+	std::ptrdiff_t TransferOutWithLimit(F transfer_function, size_t limit)
+	{
+		size_t amount = std::min(this->RemainingBytesToTransfer(), limit);
+		if (amount == 0) return 0;
+
+		assert(this->pos < this->buffer.size());
+		assert(this->pos + amount <= this->buffer.size());
+		auto output_buffer = std::span<const uint8_t>(this->buffer.data() + this->pos, amount);
+		std::ptrdiff_t bytes = transfer_function(output_buffer);
+		if (bytes > 0) this->pos += bytes;
+		return bytes;
+	}
+
+	/**
+	 * Transfer data from the packet to the given function. It starts reading at the
+	 * position the last transfer stopped.
+	 * See Packet::TransferIn for more information about transferring data to functions.
+	 * @param transfer_function The function to pass span of bytes to write to.
+	 *                          It returns the amount that was written or -1 upon errors.
+	 * @tparam F The type of the transfer_function.
+	 * @return The return value of the transfer_function.
+	 */
+	template <typename F>
+	std::ptrdiff_t TransferOut(F transfer_function)
+	{
+		return TransferOutWithLimit(transfer_function, std::numeric_limits<size_t>::max());
+	}
+
+	/**
+	 * Transfer data from the given function into the packet. It starts writing at the
+	 * position the last transfer stopped.
+	 *
+	 * Examples of functions that can be used to transfer data into a packet are TCP's
+	 * recv and UDP's recvfrom functions. They will directly write their data into the
+	 * packet without an intermediate buffer.
+	 * Examples of functions that can be used to transfer data from a packet are TCP's
+	 * send and UDP's sendto functions. They will directly read the data from the packet's
+	 * buffer without an intermediate buffer.
+	 * These are functions are special in a sense as even though the packet can send or
+	 * receive an amount of data, those functions can say they only processed a smaller
+	 * amount, so special handling is required to keep the position pointers correct.
+	 * Most of these transfer functions are in the form function(source, buffer, amount, ...),
+	 * so the template of this function will assume that as the base parameter order.
+	 *
+	 * This will attempt to write all the remaining bytes into the packet. It updates the
+	 * position based on how many bytes were actually written by the called transfer_function.
+	 * @param transfer_function The function to pass a span of bytes to read to.
+	 *                          It returns the amount that was read or -1 upon errors.
+	 * @tparam F The type of the transfer_function.
+	 * @return The return value of the transfer_function.
+	 */
+	template <typename F>
+	std::ptrdiff_t TransferIn(F transfer_function)
+	{
+		size_t amount = this->RemainingBytesToTransfer();
+		if (amount == 0) return 0;
+
+		assert(this->pos < this->buffer.size());
+		assert(this->pos + amount <= this->buffer.size());
+		auto input_buffer = std::span<uint8_t>(this->buffer.data() + this->pos, amount);
+		std::ptrdiff_t bytes = transfer_function(input_buffer);
+		if (bytes > 0) this->pos += bytes;
+		return bytes;
+	}
+};
+
+#endif /* NETWORK_CORE_PACKET_H */

@@ -1,0 +1,200 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file game_sl.cpp Handles the saveload part of the GameScripts. */
+
+#include "../stdafx.h"
+#include "../debug.h"
+
+#include "saveload.h"
+#include "saveload_error.hpp"
+#include "compat/game_sl_compat.h"
+
+#include "../game/game.hpp"
+#include "../game/game_config.hpp"
+#include "../network/network.h"
+#include "../game/game_instance.hpp"
+#include "../game/game_text.hpp"
+
+#include "../safeguards.h"
+
+static std::string _game_saveload_name;
+static int         _game_saveload_version;
+static std::string _game_saveload_settings;
+
+static const SaveLoad _game_script_desc[] = {
+	SaveLoad::String("name", SLE_GLOBAL_ADDRESS(_game_saveload_name)),
+	SaveLoad::String("settings", SLE_GLOBAL_ADDRESS(_game_saveload_settings)),
+	SaveLoad::Variable<VarFileType::U32>("version", SLE_GLOBAL_ADDRESS(_game_saveload_version)),
+};
+
+static void SaveReal_GSDT(int)
+{
+	GameConfig *config = GameConfig::GetConfig();
+
+	if (config->HasScript()) {
+		_game_saveload_name = config->GetName();
+		_game_saveload_version = config->GetVersion();
+	} else {
+		/* No GameScript is configured for this so store an empty string as name. */
+		_game_saveload_name.clear();
+		_game_saveload_version = -1;
+	}
+
+	_game_saveload_settings = config->SettingsToString();
+
+	SlObject(nullptr, _game_script_desc);
+	Game::Save();
+}
+
+struct GSDTChunkHandler : ChunkHandler {
+	GSDTChunkHandler() : ChunkHandler("GSDT", ChunkType::Table) {}
+
+	void Load() const override
+	{
+		const std::vector<SaveLoad> slt = SlCompatTableHeader(_game_script_desc, _game_script_sl_compat);
+
+		/* Free all current data */
+		GameConfig::GetConfig(GameConfig::ScriptSettingSource::ForceCurrentGame)->Change(std::nullopt);
+
+		if (SlIterateArray() == -1) return;
+
+		_game_saveload_version = -1;
+		SlObject(nullptr, slt);
+
+		if (_game_mode == GameMode::Menu || (_networking && !_network_server)) {
+			GameInstance::LoadEmpty();
+			if (SlIterateArray() != -1) SlErrorCorrupt("Too many GameScript configs");
+			return;
+		}
+
+		GameConfig *config = GameConfig::GetConfig(GameConfig::ScriptSettingSource::ForceCurrentGame);
+		if (!_game_saveload_name.empty()) {
+			config->Change(_game_saveload_name, _game_saveload_version, false);
+			if (!config->HasScript()) {
+				/* No version of the GameScript available that can load the data. Try to load the
+				 * latest version of the GameScript instead. */
+				config->Change(_game_saveload_name, -1, false);
+				if (!config->HasScript()) {
+					if (_game_saveload_name != "%_dummy") {
+						Debug(Facility::Script, Severity::Critical, "The savegame has an GameScript by the name '{}', version {} which is no longer available.", _game_saveload_name, _game_saveload_version);
+						Debug(Facility::Script, Severity::Critical, "This game will continue to run without GameScript.");
+					} else {
+						Debug(Facility::Script, Severity::Critical, "The savegame had no GameScript available at the time of saving.");
+						Debug(Facility::Script, Severity::Critical, "This game will continue to run without GameScript.");
+					}
+				} else {
+					Debug(Facility::Script, Severity::Critical, "The savegame has an GameScript by the name '{}', version {} which is no longer available.", _game_saveload_name, _game_saveload_version);
+					Debug(Facility::Script, Severity::Critical, "The latest version of that GameScript has been loaded instead, but it'll not get the savegame data as it's incompatible.");
+				}
+				/* Make sure the GameScript doesn't get the saveload data, as it was not the
+				 *  writer of the saveload data in the first place */
+				_game_saveload_version = -1;
+			}
+		}
+
+		config->StringToSettings(_game_saveload_settings);
+
+		/* Load the GameScript saved data */
+		config->SetToLoadData(GameInstance::Load(_game_saveload_version));
+
+		if (SlIterateArray() != -1) SlErrorCorrupt("Too many GameScript configs");
+	}
+
+	void Save() const override
+	{
+		SlTableHeader(_game_script_desc);
+		SlSetArrayIndex(0);
+		SlAutolength(SaveReal_GSDT, 0);
+	}
+};
+
+extern std::shared_ptr<GameStrings> _current_gamestrings_data;
+
+static std::string _game_saveload_string;
+static uint32_t _game_saveload_strings;
+
+class SlGameLanguageString : public DefaultSaveLoadHandler<SlGameLanguageString, LanguageStrings> {
+public:
+	static inline const SaveLoad description[] = {
+		SaveLoad::String("string", SLE_GLOBAL_ADDRESS(_game_saveload_string), {StringValidationSetting::AllowControlCode, StringValidationSetting::ReplaceTabCrNlWithSpace}),
+	};
+	static inline const SaveLoadCompatTable compat_description = _game_language_string_sl_compat;
+
+	void Save(LanguageStrings *ls) const override
+	{
+		SlSetStructListLength(ls->lines.size());
+
+		for (const auto &string : ls->lines) {
+			_game_saveload_string = string;
+			SlObject(nullptr, this->GetDescription());
+		}
+	}
+
+	void Load(LanguageStrings *ls) const override
+	{
+		uint32_t length = IsSavegameVersionBefore(SaveLoadVersion::SaveloadListLength) ? _game_saveload_strings : (uint32_t)SlGetStructListLength(UINT32_MAX);
+
+		for (uint32_t i = 0; i < length; i++) {
+			SlObject(nullptr, this->GetLoadDescription());
+			ls->lines.emplace_back(_game_saveload_string);
+		}
+	}
+};
+
+static const SaveLoad _game_language_desc[] = {
+	SaveLoad::String("language", SLE_OBJECT_ADDRESS(LanguageStrings, language)),
+	SaveLoad::Variable<VarFileType::U32>("count", SLE_GLOBAL_ADDRESS(_game_saveload_strings), SaveLoadVersion::MinVersion, SaveLoadVersion::SaveloadListLength),
+	SaveLoad::StructList<SlGameLanguageString>("strings"),
+};
+
+struct GSTRChunkHandler : ChunkHandler {
+	GSTRChunkHandler() : ChunkHandler("GSTR", ChunkType::Table) {}
+
+	void Load() const override
+	{
+		const std::vector<SaveLoad> slt = SlCompatTableHeader(_game_language_desc, _game_language_sl_compat);
+
+		_current_gamestrings_data = std::make_shared<GameStrings>();
+
+		while (SlIterateArray() != -1) {
+			LanguageStrings ls;
+			SlObject(&ls, slt);
+			_current_gamestrings_data->raw_strings.push_back(std::move(ls));
+		}
+
+		/* If there were no strings in the savegame, set GameStrings to nullptr */
+		if (_current_gamestrings_data->raw_strings.empty()) {
+			_current_gamestrings_data.reset();
+			return;
+		}
+
+		_current_gamestrings_data->Compile();
+		ReconsiderGameScriptLanguage();
+	}
+
+	void Save() const override
+	{
+		SlTableHeader(_game_language_desc);
+
+		if (_current_gamestrings_data == nullptr) return;
+
+		for (uint i = 0; i < _current_gamestrings_data->raw_strings.size(); i++) {
+			SlSetArrayIndex(i);
+			SlObject(&_current_gamestrings_data->raw_strings[i], _game_language_desc);
+		}
+	}
+};
+
+static const GSTRChunkHandler GSTR;
+static const GSDTChunkHandler GSDT;
+static const ChunkHandlerRef game_chunk_handlers[] = {
+	GSTR,
+	GSDT,
+};
+
+extern const ChunkHandlerTable _game_chunk_handlers(game_chunk_handlers);

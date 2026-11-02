@@ -1,0 +1,270 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file game_core.cpp Implementation of Game. */
+
+#include "../stdafx.h"
+#include "../core/backup_type.hpp"
+#include "../company_base.h"
+#include "../company_func.h"
+#include "../network/network.h"
+#include "../window_func.h"
+#include "../framerate_type.h"
+#include "game.hpp"
+#include "game_scanner.hpp"
+#include "game_config.hpp"
+#include "game_instance.hpp"
+#include "game_info.hpp"
+
+#include "../safeguards.h"
+
+/* static */ uint Game::frame_counter = 0;
+/* static */ GameInfo *Game::info = nullptr;
+/* static */ std::unique_ptr<GameInstance> Game::instance = nullptr;
+/* static */ std::unique_ptr<GameScannerInfo> Game::scanner_info = nullptr;
+/* static */ std::unique_ptr<GameScannerLibrary> Game::scanner_library = nullptr;
+
+/* static */ void Game::GameLoop()
+{
+	if (_networking && !_network_server) {
+		PerformanceMeasurer::SetInactive(PerformanceElement::GameScript);
+		return;
+	}
+	if (Game::instance == nullptr) {
+		PerformanceMeasurer::SetInactive(PerformanceElement::GameScript);
+		return;
+	}
+
+	PerformanceMeasurer framerate(PerformanceElement::GameScript);
+
+	Game::frame_counter++;
+
+	AutoRestoreBackup cur_company(_current_company, OWNER_DEITY);
+	Game::instance->GameLoop();
+
+	/* Occasionally collect garbage */
+	if ((Game::frame_counter & 255) == 0) {
+		Game::instance->CollectGarbage();
+	}
+}
+
+/* static */ void Game::Initialize()
+{
+	if (Game::instance != nullptr) Game::Uninitialize(true);
+
+	Game::frame_counter = 0;
+
+	if (Game::scanner_info == nullptr) {
+		TarScanner::DoScan(TarScanner::Mode::Game);
+		Game::scanner_info = std::make_unique<GameScannerInfo>();
+		Game::scanner_info->Initialize();
+		Game::scanner_library = std::make_unique<GameScannerLibrary>();
+		Game::scanner_library->Initialize();
+	}
+}
+
+/* static */ void Game::StartNew()
+{
+	if (Game::instance != nullptr) return;
+
+	/* Don't start GameScripts in intro */
+	if (_game_mode == GameMode::Menu) return;
+
+	/* Clients shouldn't start GameScripts */
+	if (_networking && !_network_server) return;
+
+	GameConfig *config = GameConfig::GetConfig(GameConfig::ScriptSettingSource::ForceCurrentGame);
+	GameInfo *info = config->GetInfo();
+	if (info == nullptr) return;
+
+	config->AnchorUnchangeableSettings();
+
+	AutoRestoreBackup cur_company(_current_company, OWNER_DEITY);
+
+	Game::info = info;
+	Game::instance = std::make_unique<GameInstance>();
+	Game::instance->Initialize(info);
+	Game::instance->LoadOnStack(config->GetToLoadData());
+	config->SetToLoadData(nullptr);
+
+	InvalidateWindowClassesData(WindowClass::ScriptDebug, -1);
+}
+
+/* static */ void Game::Uninitialize(bool keepConfig)
+{
+	Backup<CompanyID> cur_company(_current_company);
+
+	Game::ResetInstance();
+
+	cur_company.Restore();
+
+	if (keepConfig) {
+		Rescan();
+	} else {
+		Game::scanner_info.reset();
+		Game::scanner_library.reset();
+
+		_settings_game.script_config.game.reset();
+		_settings_newgame.script_config.game.reset();
+	}
+}
+
+/* static */ void Game::Pause()
+{
+	if (Game::instance != nullptr) Game::instance->Pause();
+}
+
+/* static */ void Game::Unpause()
+{
+	if (Game::instance != nullptr) Game::instance->Unpause();
+}
+
+/* static */ bool Game::IsPaused()
+{
+	return Game::instance != nullptr? Game::instance->IsPaused() : false;
+}
+
+/* static */ void Game::NewEvent(ScriptEvent *event)
+{
+	ScriptObjectRef counter(event);
+
+	/* Clients should ignore events */
+	if (_networking && !_network_server) {
+		return;
+	}
+
+	/* Check if Game instance is alive */
+	if (Game::instance == nullptr) {
+		return;
+	}
+
+	/* Queue the event */
+	AutoRestoreBackup cur_company(_current_company, OWNER_DEITY);
+	Game::instance->InsertEvent(event);
+}
+
+/* static */ void Game::ResetConfig()
+{
+	/* Check for both newgame as current game if we can reload the GameInfo inside
+	 *  the GameConfig. If not, remove the Game from the list. */
+	if (_settings_game.script_config.game != nullptr && _settings_game.script_config.game->HasScript()) {
+		if (!_settings_game.script_config.game->ResetInfo(true)) {
+			Debug(Facility::Script, Severity::Critical, "After a reload, the GameScript by the name '{}' was no longer found, and removed from the list.", _settings_game.script_config.game->GetName());
+			_settings_game.script_config.game->Change(std::nullopt);
+			if (Game::instance != nullptr) Game::ResetInstance();
+		} else if (Game::instance != nullptr) {
+			Game::info = _settings_game.script_config.game->GetInfo();
+		}
+	}
+	if (_settings_newgame.script_config.game != nullptr && _settings_newgame.script_config.game->HasScript()) {
+		if (!_settings_newgame.script_config.game->ResetInfo(false)) {
+			Debug(Facility::Script, Severity::Critical, "After a reload, the GameScript by the name '{}' was no longer found, and removed from the list.", _settings_newgame.script_config.game->GetName());
+			_settings_newgame.script_config.game->Change(std::nullopt);
+		}
+	}
+}
+
+/* static */ void Game::Rescan()
+{
+	TarScanner::DoScan(TarScanner::Mode::Game);
+
+	Game::scanner_info->RescanDir();
+	Game::scanner_library->RescanDir();
+	ResetConfig();
+
+	InvalidateWindowData(WindowClass::ScriptList, 0, 1);
+	SetWindowClassesDirty(WindowClass::ScriptDebug);
+	InvalidateWindowClassesData(WindowClass::ScriptSettings);
+	InvalidateWindowClassesData(WindowClass::GameOptions);
+}
+
+
+/* static */ void Game::Save()
+{
+	if (Game::instance != nullptr && (!_networking || _network_server)) {
+		AutoRestoreBackup cur_company(_current_company, OWNER_DEITY);
+		Game::instance->Save();
+	} else {
+		GameInstance::SaveEmpty();
+	}
+}
+
+/* static */ void Game::GetConsoleList(std::back_insert_iterator<std::string> &output_iterator, bool newest_only)
+{
+	Game::scanner_info->GetConsoleList(output_iterator, newest_only);
+}
+
+/* static */ void Game::GetConsoleLibraryList(std::back_insert_iterator<std::string> &output_iterator, bool newest_only)
+{
+	Game::scanner_library->GetConsoleList(output_iterator, newest_only);
+}
+
+/* static */ const ScriptInfoList *Game::GetInfoList()
+{
+	return Game::scanner_info->GetInfoList();
+}
+
+/* static */ const ScriptInfoList *Game::GetUniqueInfoList()
+{
+	return Game::scanner_info->GetUniqueInfoList();
+}
+
+/* static */ GameInfo *Game::FindInfo(const std::string &name, int version, bool force_exact_match)
+{
+	return Game::scanner_info->FindInfo(name, version, force_exact_match);
+}
+
+/* static */ GameLibrary *Game::FindLibrary(const std::string &library, int version)
+{
+	return Game::scanner_library->FindLibrary(library, version);
+}
+
+/* static */ void Game::ResetInstance()
+{
+	Game::instance.reset();
+	Game::info = nullptr;
+}
+
+/**
+ * Check whether we have an Game with the exact characteristics as ci.
+ * @param ci the characteristics to search on (shortname and md5sum)
+ * @param md5sum whether to check the MD5 checksum
+ * @return true iff we have an Game matching.
+ */
+/* static */ bool Game::HasGame(const ContentInfo &ci, bool md5sum)
+{
+	return Game::scanner_info->HasScript(ci, md5sum);
+}
+
+/**
+ * Check whether we have an Game library with the exact characteristics as ci.
+ * @param ci the characteristics to search on (shortname and md5sum)
+ * @param md5sum whether to check the MD5 checksum
+ * @return true iff we have an Game library matching.
+ */
+/* static */ bool Game::HasGameLibrary(const ContentInfo &ci, bool md5sum)
+{
+	return Game::scanner_library->HasScript(ci, md5sum);
+}
+
+/**
+ * Get the scanner info for Game scripts.
+ * @return The Game Script scanner info.
+ */
+/* static */ GameScannerInfo *Game::GetScannerInfo()
+{
+	return Game::scanner_info.get();
+}
+
+/**
+ * Get the scanner info for Game script libraries.
+ * @return The Game script library scanner info.
+ */
+/* static */ GameScannerLibrary *Game::GetScannerLibrary()
+{
+	return Game::scanner_library.get();
+}

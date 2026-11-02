@@ -1,0 +1,34 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file goal_cmd.h Command definitions related to goals. */
+
+#ifndef GOAL_CMD_H
+#define GOAL_CMD_H
+
+#include "command_type.h"
+#include "goal_type.h"
+
+std::tuple<CommandCost, GoalID> CmdCreateGoal(DoCommandFlags flags, CompanyID company, GoalType type, GoalTypeID dest, const EncodedString &text);
+CommandCost CmdRemoveGoal(DoCommandFlags flags, GoalID goal);
+CommandCost CmdSetGoalDestination(DoCommandFlags flags, GoalID goal, GoalType type, GoalTypeID dest);
+CommandCost CmdSetGoalText(DoCommandFlags flags, GoalID goal, const EncodedString &text);
+CommandCost CmdSetGoalProgress(DoCommandFlags flags, GoalID goal, const EncodedString &text);
+CommandCost CmdSetGoalCompleted(DoCommandFlags flags, GoalID goal, bool completed);
+CommandCost CmdGoalQuestion(DoCommandFlags flags, uint16_t uniqueid, uint32_t target, bool is_client, GoalQuestionButtons buttons, GoalQuestionType type, const EncodedString &text);
+CommandCost CmdGoalQuestionAnswer(DoCommandFlags flags, uint16_t uniqueid, GoalQuestionButton button);
+
+DEF_CMD_TRAIT(Commands::CreateGoal, CmdCreateGoal, CommandFlags({CommandFlag::Deity, CommandFlag::StrCtrl}), CommandType::OtherManagement)
+DEF_CMD_TRAIT(Commands::RemoveGoal, CmdRemoveGoal, CommandFlag::Deity, CommandType::OtherManagement)
+DEF_CMD_TRAIT(Commands::SetGoalDestination, CmdSetGoalDestination, CommandFlags({CommandFlag::Deity, CommandFlag::StrCtrl}), CommandType::OtherManagement)
+DEF_CMD_TRAIT(Commands::SetGoalText, CmdSetGoalText, CommandFlags({CommandFlag::Deity, CommandFlag::StrCtrl}), CommandType::OtherManagement)
+DEF_CMD_TRAIT(Commands::SetGoalProgress, CmdSetGoalProgress, CommandFlags({CommandFlag::Deity, CommandFlag::StrCtrl}), CommandType::OtherManagement)
+DEF_CMD_TRAIT(Commands::SetGoalCompleted, CmdSetGoalCompleted, CommandFlags({CommandFlag::Deity, CommandFlag::StrCtrl}), CommandType::OtherManagement)
+DEF_CMD_TRAIT(Commands::GoalQuestion, CmdGoalQuestion, CommandFlags({CommandFlag::Deity, CommandFlag::StrCtrl}), CommandType::OtherManagement)
+DEF_CMD_TRAIT(Commands::GoalQuestionAnswer, CmdGoalQuestionAnswer, CommandFlag::Deity, CommandType::OtherManagement)
+
+#endif /* GOAL_CMD_H */

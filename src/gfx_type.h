@@ -1,0 +1,442 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file gfx_type.h Types related to the graphics and/or input devices. */
+
+#ifndef GFX_TYPE_H
+#define GFX_TYPE_H
+
+#include "core/enum_type.hpp"
+#include "core/geometry_type.hpp"
+#include "zoom_type.h"
+
+typedef uint32_t SpriteID;  ///< The number of a sprite, without mapping bits and colourtables
+typedef uint32_t PaletteID; ///< The number of the palette
+typedef uint32_t CursorID;  ///< The number of the cursor (sprite)
+
+/** Combination of a palette sprite and a 'real' sprite */
+struct PalSpriteID {
+	SpriteID sprite{};  ///< The 'real' sprite
+	PaletteID pal{};    ///< The palette (use \c PAL_NONE) if not needed)
+
+	auto operator<=>(const PalSpriteID&) const = default;
+};
+
+enum WindowKeyCodes : uint16_t {
+	WKC_SHIFT = 0x8000,
+	WKC_CTRL  = 0x4000,
+	WKC_ALT   = 0x2000,
+	WKC_META  = 0x1000,
+
+	WKC_GLOBAL_HOTKEY = 0x0800, ///< Fake keycode bit to indicate global hotkeys
+
+	WKC_SPECIAL_KEYS = WKC_SHIFT | WKC_CTRL | WKC_ALT | WKC_META | WKC_GLOBAL_HOTKEY,
+
+	/* Special ones */
+	WKC_NONE        =  0,
+	WKC_ESC         =  1,
+	WKC_BACKSPACE   =  2,
+	WKC_INSERT      =  3,
+	WKC_DELETE      =  4,
+
+	WKC_PAGEUP      =  5,
+	WKC_PAGEDOWN    =  6,
+	WKC_END         =  7,
+	WKC_HOME        =  8,
+
+	/* Arrow keys */
+	WKC_LEFT        =  9,
+	WKC_UP          = 10,
+	WKC_RIGHT       = 11,
+	WKC_DOWN        = 12,
+
+	/* Return & tab */
+	WKC_RETURN      = 13,
+	WKC_TAB         = 14,
+
+	/* Space */
+	WKC_SPACE       = 32,
+
+	/* Function keys */
+	WKC_F1          = 33,
+	WKC_F2          = 34,
+	WKC_F3          = 35,
+	WKC_F4          = 36,
+	WKC_F5          = 37,
+	WKC_F6          = 38,
+	WKC_F7          = 39,
+	WKC_F8          = 40,
+	WKC_F9          = 41,
+	WKC_F10         = 42,
+	WKC_F11         = 43,
+	WKC_F12         = 44,
+
+	/* Backquote is the key left of "1"
+	 * we only store this key here, no matter what character is really mapped to it
+	 * on a particular keyboard. (US keyboard: ` and ~ ; German keyboard: ^ and °) */
+	WKC_BACKQUOTE   = 45,
+	WKC_PAUSE       = 46,
+
+	/* 0-9 are mapped to 48-57
+	 * A-Z are mapped to 65-90
+	 * a-z are mapped to 97-122 */
+
+	/* Numerical keyboard */
+	WKC_NUM_DIV     = 138,
+	WKC_NUM_MUL     = 139,
+	WKC_NUM_MINUS   = 140,
+	WKC_NUM_PLUS    = 141,
+	WKC_NUM_ENTER   = 142,
+	WKC_NUM_DECIMAL = 143,
+
+	/* Other keys */
+	WKC_SLASH       = 144, ///< / Forward slash
+	WKC_SEMICOLON   = 145, ///< ; Semicolon
+	WKC_EQUALS      = 146, ///< = Equals
+	WKC_L_BRACKET   = 147, ///< [ Left square bracket
+	WKC_BACKSLASH   = 148, ///< \ Backslash
+	WKC_R_BRACKET   = 149, ///< ] Right square bracket
+	WKC_SINGLEQUOTE = 150, ///< ' Single quote
+	WKC_COMMA       = 151, ///< , Comma
+	WKC_PERIOD      = 152, ///< . Period
+	WKC_MINUS       = 153, ///< - Minus
+};
+
+/** A single sprite of a list of animated cursors */
+struct AnimCursor {
+	CursorID sprite; ///< Must be set to LAST_ANIM when it is the last sprite of the loop
+	uint8_t display_time; ///< Amount of ticks this sprite will be shown
+};
+
+struct CursorSprite {
+	PalSpriteID image; ///< Image.
+	Point pos; ///< Relative position.
+
+	constexpr CursorSprite(SpriteID spr, PaletteID pal, int x, int y) : image({spr, pal}), pos({x, y}) {}
+};
+
+/** Collection of variables for cursor-display and -animation */
+struct CursorVars {
+	/* Logical mouse position */
+	Point pos;                    ///< logical mouse position
+	Point delta;                  ///< relative mouse movement in this tick
+	int wheel;                    ///< mouse wheel movement
+	bool fix_at;                  ///< mouse is moving, but cursor is not (used for scrolling)
+
+	/* 2D wheel scrolling for moving around the map */
+	bool wheel_moved;
+	float v_wheel;
+	float h_wheel;
+
+	/* Mouse appearance */
+	std::vector<CursorSprite> sprites; ///< Sprites comprising cursor.
+	Point total_offs, total_size; ///< union of sprite properties
+
+	Point draw_pos, draw_size;    ///< position and size bounding-box for drawing
+
+	std::span<const AnimCursor> animate_list{}; ///< in case of animated cursor, list of frames
+	std::span<const AnimCursor>::iterator animate_cur = std::end(animate_list);  ///< in case of animated cursor, current frame
+	uint animate_timeout;           ///< in case of animated cursor, number of ticks to show the current cursor
+
+	bool visible;                 ///< cursor is visible
+	bool dirty;                   ///< the rect occupied by the mouse is dirty (redraw)
+	bool in_window;               ///< mouse inside this window, determines drawing logic
+
+	/* Drag data */
+	bool vehchain;                ///< vehicle chain is dragged
+
+	void UpdateCursorPositionRelative(int delta_x, int delta_y);
+	bool UpdateCursorPosition(int x, int y);
+};
+
+/** Data about how and where to blit pixels. */
+struct DrawPixelInfo {
+	void *dst_ptr;
+	int left, top, width, height;
+	int pitch;
+	ZoomLevel zoom;
+};
+
+/** Packed colour union to access the alpha, red, green, and blue channels from a 32 bit number for Emscripten build. */
+union ColourRGBA {
+	uint32_t data; ///< Conversion of the channel information to a 32 bit number.
+	struct {
+		uint8_t r, g, b, a; ///< colour channels as used in browsers
+	};
+
+	/**
+	 * Create a new colour.
+	 * @param r The channel for the red colour.
+	 * @param g The channel for the green colour.
+	 * @param b The channel for the blue colour.
+	 * @param a The channel for the alpha/transparency.
+	 */
+	constexpr ColourRGBA(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 0xFF) : r(r), g(g), b(b), a(a) { }
+
+	/**
+	 * Create a new colour.
+	 * @param data The colour in the correct packed format.
+	 */
+	constexpr ColourRGBA(uint data = 0) : data(data) { }
+
+	bool operator==(const ColourRGBA &other) const { return this->data == other.data; };
+};
+
+/** Packed colour union to access the alpha, red, green, and blue channels from a 32 bit number for big-endian systems. */
+union ColourARGB {
+	uint32_t data; ///< Conversion of the channel information to a 32 bit number.
+	struct {
+		uint8_t a, r, g, b; ///< colour channels in BE order
+	};
+
+	/**
+	 * Create a new colour.
+	 * @param r The channel for the red colour.
+	 * @param g The channel for the green colour.
+	 * @param b The channel for the blue colour.
+	 * @param a The channel for the alpha/transparency.
+	 */
+	constexpr ColourARGB(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 0xFF) : a(a), r(r), g(g), b(b) { }
+
+	/**
+	 * Create a new colour.
+	 * @param data The colour in the correct packed format.
+	 */
+	constexpr ColourARGB(uint data = 0) : data(data) { }
+
+	bool operator==(const ColourARGB &other) const { return this->data == other.data; };
+};
+
+/** Packed colour union to access the alpha, red, green, and blue channels from a 32 bit number for little-endian systems. */
+union ColourBGRA {
+	uint32_t data; ///< Conversion of the channel information to a 32 bit number.
+	struct {
+		uint8_t b, g, r, a; ///< colour channels in LE order
+	};
+
+	/**
+	 * Create a new colour.
+	 * @param r The channel for the red colour.
+	 * @param g The channel for the green colour.
+	 * @param b The channel for the blue colour.
+	 * @param a The channel for the alpha/transparency.
+	 */
+	constexpr ColourBGRA(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 0xFF) : b(b), g(g), r(r), a(a) { }
+
+	/**
+	 * Create a new colour.
+	 * @param data The colour in the correct packed format.
+	 */
+	constexpr ColourBGRA(uint data = 0) : data(data) { }
+
+	bool operator==(const ColourBGRA &other) const { return this->data == other.data; };
+};
+
+#if defined(__EMSCRIPTEN__)
+using Colour = ColourRGBA;
+#else
+using Colour = std::conditional_t<std::endian::native == std::endian::little, ColourBGRA, ColourARGB>;
+#endif /* defined(__EMSCRIPTEN__) */
+
+static_assert(sizeof(Colour) == sizeof(uint32_t));
+
+/** Available font sizes */
+enum class FontSize : uint8_t {
+	Normal, ///< Index of the normal font in the font tables.
+	Small, ///< Index of the small font in the font tables.
+	Large, ///< Index of the large font in the font tables.
+	Monospace, ///< Index of the monospaced font in the font tables.
+
+	End, ///< Marker for the end of the enumerations.
+	Begin = FontSize::Normal, ///< Marker for the first font in the enumeration.
+};
+
+/** Bitset of \c FontSize elements. */
+using FontSizes = EnumBitSet<FontSize, uint8_t>;
+
+/** Mask of all possible font sizes. */
+constexpr FontSizes FONTSIZES_ALL{FontSize::Normal, FontSize::Small, FontSize::Large, FontSize::Monospace};
+/** Mask of font sizes required to be present. */
+constexpr FontSizes FONTSIZES_REQUIRED{FontSize::Normal, FontSize::Small, FontSize::Large};
+
+inline std::string_view FontSizeToName(FontSize fs)
+{
+	static const std::string_view SIZE_TO_NAME[] = { "medium", "small", "large", "mono" };
+	assert(fs < FontSize::End);
+	return SIZE_TO_NAME[to_underlying(fs)];
+}
+
+/**
+ * Used to only draw a part of the sprite.
+ * Draw the subsprite in the rect (sprite_x_offset + left, sprite_y_offset + top) to (sprite_x_offset + right, sprite_y_offset + bottom).
+ * Both corners are included in the drawing area.
+ */
+struct SubSprite {
+	int left, top, right, bottom;
+};
+
+/** One of 16 base colours used for companies and windows/widgets. */
+enum class Colours : uint8_t {
+	Begin, ///< Begin marker.
+	DarkBlue = Colours::Begin, ///< Dark blue
+	PaleGreen, ///< Pale green
+	Pink, ///< Pink
+	Yellow, ///< Yellow
+	Red, ///< Red
+	LightBlue, ///< Light blue
+	Green, ///< Green
+	DarkGreen, ///< Dark green
+	Blue, ///< Blue
+	Cream, ///< Cream
+	Mauve, ///< Mauve
+	Purple, ///< Purple
+	Orange, ///< Orange
+	Brown, ///< Brown
+	Grey, ///< Grey
+	White, ///< White
+	End, ///< End-of-array marker.
+	Invalid = 0xFF, ///< Invalid marker.
+};
+DECLARE_INCREMENT_DECREMENT_OPERATORS(Colours)
+
+/** Colour for pixel/line drawing. */
+struct PixelColour {
+	uint8_t p; ///< Palette index.
+
+	constexpr PixelColour() : p(0) {}
+	explicit constexpr PixelColour(uint8_t p) : p(p) {}
+};
+
+/** Colour of the strings, see _string_colourmap in table/string_colours.h or docs/ottd-colourtext-palette.png */
+enum class TextColour : uint8_t {
+	Begin = 0x00, ///< Marker for the begin of the range.
+	FromString = Begin, ///< Marker for telling to use the colour from the string.
+	Blue = Begin, ///< Blue colour.
+	Silver, ///< Silver colour.
+	Gold, ///< Gold colour.
+	Red, ///< Red colour.
+	Purple, ///< Purple colour.
+	LightBrown, ///< Light brown colour.
+	Orange, ///< Orange colour.
+	Green, ///< Green colour.
+	Yellow, ///< Yellow colour.
+	DarkGreen, ///< Dark green colour.
+	Cream, ///< Cream colour.
+	Brown, ///< Brown colour.
+	White, ///< White colour.
+	LightBlue, ///< Light blue colour.
+	Grey, ///< Grey colour.
+	DarkBlue, ///< Dark blue colour.
+	Black, ///< Black colour.
+	End, ///< Marker for the end of the range.
+	Invalid = 0xFF, ///< Invalid colour.
+};
+
+/** Enumeration of the flags of ExtendedTextColour. */
+enum class ExtendedTextColourFlag : uint8_t{
+	IsPaletteColour, ///< Colour value is already a real palette colour index, not an index of a StringColour.
+	NoShade, ///< Do not add shading to this text colour.
+	Forced, ///< Ignore colour changes from strings.
+};
+
+using ExtendedTextColourFlags = EnumBitSet<ExtendedTextColourFlag, uint8_t>; ///< Bitset of the flags of ExtendedTextColour. */
+
+/** Container for the text colour and some text colour related flags for drawing. */
+struct ExtendedTextColour {
+	/**
+	 * Create the extended text colour based on a TextColour and optional flags.
+	 * @param colour The colour.
+	 * @param flags The flags.
+	 */
+	constexpr ExtendedTextColour(TextColour colour = TextColour::Invalid, ExtendedTextColourFlags flags = {}) : colour(colour), flags(flags) {}
+
+	/**
+	 * Create the extended text colour based on a PixelColour.
+	 * @param pc The pixel colour for this colour.
+	 */
+	constexpr ExtendedTextColour(PixelColour pc) : colour(static_cast<TextColour>(pc.p)), flags(ExtendedTextColourFlag::IsPaletteColour) {}
+
+	TextColour colour; ///< The colour
+	ExtendedTextColourFlags flags{}; ///< The flags.
+
+	/**
+	 * Compare with another instance of this class.
+	 * @return The std::strong_ordering of the comparison.
+	 */
+	constexpr auto operator<=>(const ExtendedTextColour &) const = default;
+
+	/**
+	 * Decode the network encoded text colour.
+	 * @param tc The network encoded colour.
+	 * @return The decoded colour.
+	 */
+	static constexpr ExtendedTextColour FromNetwork(uint16_t tc) { return ExtendedTextColour{static_cast<TextColour>(tc & 0xFF), ExtendedTextColourFlags(tc >> 8)}; }
+
+	/**
+	 * Encode this text colour for sending over the network.
+	 * @return The encoded colour.
+	 */
+	constexpr uint16_t ToNetwork() const { return to_underlying(this->colour) | this->flags.base() << 8; }
+};
+
+/* A few values that are related to animations using palette changes */
+static constexpr uint8_t PALETTE_ANIM_SIZE = 28; ///< number of animated colours
+static constexpr uint8_t PALETTE_ANIM_START = 227; ///< Index in  the _palettes array from which all animations are taking places (table/palettes.h)
+
+/** Define the operation GfxFillRect performs */
+enum class FillRectMode : uint8_t {
+	Opaque, ///< Fill rectangle with a single colour
+	Checker, ///< Draw only every second pixel, used for greying-out
+	Recolour, ///< Apply a recolour sprite to the screen content
+};
+
+/** Palettes OpenTTD supports. */
+enum class PaletteType : uint8_t {
+	DOS, ///< Use the DOS palette.
+	Windows, ///< Use the Windows palette.
+};
+
+/** Types of sprites that might be loaded */
+enum class SpriteType : uint8_t {
+	Normal   = 0,      ///< The most basic (normal) sprite
+	MapGen   = 1,      ///< Special sprite for the map generator
+	Font     = 2,      ///< A sprite used for fonts
+	Recolour = 3,      ///< Recolour sprite
+	Invalid  = 4,      ///< Pseudosprite or other unusable sprite, used only internally
+};
+
+/**
+ * The number of milliseconds per game tick.
+ * The value 27 together with a day length of 74 ticks makes one day 1998 milliseconds, almost exactly 2 seconds.
+ * With a 2 second day, one standard month is 1 minute, and one standard year is slightly over 12 minutes.
+ */
+static const uint MILLISECONDS_PER_TICK = 27;
+
+/** Information about the currently used palette. */
+struct Palette {
+	Colour palette[256]; ///< Current palette. Entry 0 has to be always fully transparent!
+	int first_dirty;     ///< The first dirty element.
+	int count_dirty;     ///< The number of dirty elements.
+};
+
+/** Modes for 8bpp support */
+enum class Support8bpp : uint8_t {
+	None = 0, ///< No support for 8bpp by OS or hardware, force 32bpp blitters.
+	System, ///< No 8bpp support by hardware, do not try to use 8bpp video modes or hardware palettes.
+	Hardware, ///< Full 8bpp support by OS and hardware.
+};
+
+/** The four direction keys on a keyboard. */
+enum class DirectionKey {
+	Left, ///< Left
+	Up, ///< Up
+	Right, ///< Right
+	Down, ///< Down
+};
+using DirectionKeys = EnumBitSet<DirectionKey, uint8_t>; ///< Bitset of the direction keys.
+
+#endif /* GFX_TYPE_H */

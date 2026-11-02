@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.openttd.android"
+    android:versionCode="16000000"
+    android:versionName="16.0"
+    android:installLocation="auto">
+
+    <!--
+        The manifest is deliberately kept to attributes that predate API 24.
+        The only aapt2 that runs on this host is Android build-tools 2.19, which
+        cannot read the resource table of a modern platform jar, so a newer
+        framework cannot be used as the include for resource linking.  Anything
+        newer than the old framework's attribute set would be rejected here, and
+        none of it is needed: SDL's own manifest uses the same attribute set,
+        and the app does not rely on any newer platform behaviour.
+    -->
+
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
+
+    <!-- Neither of these is needed, but declaring them keeps the app
+         installable on devices and TV boxes that lack them. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+
+    <!-- Declared so the app stays installable on devices that do not advertise a
+         landscape screen.  Deliberately required="false": the app itself is
+         landscape (see the activity below), and marking it required would hide
+         the app on hardware that simply does not report the feature. -->
+    <uses-feature android:name="android.hardware.screen.landscape" android:required="false" />
+
+    <!-- INTERNET is needed for the game's online multiplayer: joining or
+         hosting a game, and the in-game content download service.  The game
+         itself contains no advertising and phones nothing home on its own;
+         the permission only exists so the user can take part in the online
+         features when they choose to.  ACCESS_NETWORK_STATE lets the game tell
+         whether the device actually has a connection, instead of failing a
+         connect in the dark. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+        android:hardwareAccelerated="true"
+        android:allowBackup="false">
+
+        <!--
+            SDLActivity is subclassed by the game's own activity, which is what
+            SDL looks for: the class named here is the one it instantiates, and
+            its runtime class name must match a library SDL can load.
+
+            launchMode and configChanges follow SDL's requirements: the
+            activity is never recreated for a configuration change, because
+            recreating it would tear down the SDL thread the game runs on.
+
+            screenOrientation locks the app to landscape.  sensorLandscape
+            rather than landscape: both landscape rotations are allowed, so
+            turning the device over flips the display instead of being ignored,
+            but portrait is never entered.  The activity's Java enforces the
+            same thing (see setOrientationBis), because SDL asks for an
+            orientation itself and would otherwise derive one from the window
+            size, which can come out portrait at startup.
+        -->
+        <activity
+            android:name="org.openttd.android.OpenTTD"
+            android:label="@string/app_name"
+            android:alwaysRetainTaskState="true"
+            android:launchMode="singleInstance"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

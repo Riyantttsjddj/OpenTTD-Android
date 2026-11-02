@@ -1,0 +1,186 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file factory.hpp Factory to 'query' all available blitters. */
+
+#ifndef BLITTER_FACTORY_HPP
+#define BLITTER_FACTORY_HPP
+
+#include "base.hpp"
+#include "../debug.h"
+#include "../string_func.h"
+
+
+/**
+ * The base factory, keeping track of all blitters.
+ */
+class BlitterFactory {
+private:
+	const std::string name;        ///< The name of the blitter factory.
+	const std::string description; ///< The description of the blitter.
+
+	typedef std::map<std::string, BlitterFactory *> Blitters; ///< Map of blitter factories.
+
+	/**
+	 * Get the map with currently known blitters.
+	 * @return The known blitters.
+	 */
+	static Blitters &GetBlitters()
+	{
+		static Blitters &s_blitters = *new Blitters();
+		return s_blitters;
+	}
+
+	/**
+	 * Get the currently active blitter.
+	 * @return The currently active blitter.
+	 */
+	static std::unique_ptr<Blitter> &GetActiveBlitter()
+	{
+		static std::unique_ptr<Blitter> s_blitter = nullptr;
+		return s_blitter;
+	}
+
+protected:
+	/**
+	 * Construct the blitter, and register it.
+	 * @param name        The name of the blitter.
+	 * @param description A longer description for the blitter.
+	 * @param usable      Whether the blitter is usable (on the current computer). For example for disabling SSE blitters when the CPU can't handle them.
+	 * @pre name != nullptr.
+	 * @pre description != nullptr.
+	 * @pre There is no blitter registered with this name.
+	 */
+	BlitterFactory(std::string_view name, std::string_view description, bool usable = true) :
+			name(name), description(description)
+	{
+		if (usable) {
+			Blitters &blitters = GetBlitters();
+			assert(blitters.find(this->name) == blitters.end());
+			/*
+			 * Only add when the blitter is usable. Do not bail out or
+			 * do more special things since the blitters are always
+			 * instantiated upon start anyhow and freed upon shutdown.
+			 */
+			blitters.insert(Blitters::value_type(this->name, this));
+		} else {
+			Debug(Facility::Driver, Severity::Error, "Not registering blitter {} as it is not usable", name);
+		}
+	}
+
+	/**
+	 * Is the blitter usable with the current drivers and hardware config?
+	 * @return True if the blitter can be instantiated.
+	 */
+	virtual bool IsUsable() const
+	{
+		return true;
+	}
+
+public:
+	/** Ensure the destructor of the sub classes are called as well. */
+	virtual ~BlitterFactory()
+	{
+		GetBlitters().erase(this->name);
+		if (GetBlitters().empty()) delete &GetBlitters();
+	}
+
+	/**
+	 * Find the requested blitter and return its class.
+	 * @param name the blitter to select.
+	 * @post Sets the blitter so GetCurrentBlitter() returns it too.
+	 * @return The selected blitter or \c nullptr when no blitter could be found.
+	 */
+	static Blitter *SelectBlitter(std::string_view name)
+	{
+		BlitterFactory *b = GetBlitterFactory(name);
+		if (b == nullptr) return nullptr;
+
+		GetActiveBlitter() = b->CreateInstance();
+
+		Debug(Facility::Driver, Severity::Error, "Successfully {} blitter '{}'", name.empty() ? "probed" : "loaded", GetCurrentBlitter()->GetName());
+		return GetCurrentBlitter();
+	}
+
+	/**
+	 * Get the blitter factory with the given name.
+	 * @param name the blitter factory to select.
+	 * @return The blitter factory, or nullptr when there isn't one with the wanted name.
+	 */
+	static BlitterFactory *GetBlitterFactory(std::string_view name)
+	{
+#if defined(DEDICATED)
+		static const std::string_view default_blitter = "null";
+#elif defined(WITH_COCOA)
+		static const std::string_view default_blitter = "32bpp-anim";
+#else
+		static const std::string_view default_blitter = "8bpp-optimized";
+#endif
+		if (GetBlitters().empty()) return nullptr;
+		std::string_view bname = name.empty() ? default_blitter : name;
+
+		for (auto &it : GetBlitters()) {
+			BlitterFactory *b = it.second;
+			if (StrEqualsIgnoreCase(bname, b->name)) {
+				return b->IsUsable() ? b : nullptr;
+			}
+		}
+		return nullptr;
+	}
+
+	/**
+	 * Get the current active blitter (always set by calling SelectBlitter).
+	 * @return The active blitter.
+	 */
+	static Blitter *GetCurrentBlitter()
+	{
+		return GetActiveBlitter().get();
+	}
+
+	/**
+	 * Fill a buffer with information about the blitters.
+	 * @param output_iterator The buffer to fill.
+	 */
+	static void GetBlittersInfo(std::back_insert_iterator<std::string> &output_iterator)
+	{
+		fmt::format_to(output_iterator, "List of blitters:\n");
+		for (auto &it : GetBlitters()) {
+			BlitterFactory *b = it.second;
+			fmt::format_to(output_iterator, "{:>18}: {}\n", b->name, b->GetDescription());
+		}
+		fmt::format_to(output_iterator, "\n");
+	}
+
+	/**
+	 * Get the long, human readable, name for the Blitter-class.
+	 * @return Name of this instance.
+	 */
+	std::string_view GetName() const
+	{
+		return this->name;
+	}
+
+	/**
+	 * Get a nice description of the blitter-class.
+	 * @return Description of this instance.
+	 */
+	std::string_view GetDescription() const
+	{
+		return this->description;
+	}
+
+	/**
+	 * Create an instance of this Blitter-class.
+	 * @return The created instance.
+	 */
+	virtual std::unique_ptr<Blitter> CreateInstance() = 0;
+};
+
+extern std::string _ini_blitter;
+extern bool _blitter_autodetected;
+
+#endif /* BLITTER_FACTORY_HPP */

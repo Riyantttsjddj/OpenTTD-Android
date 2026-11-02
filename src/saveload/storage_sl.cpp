@@ -1,0 +1,61 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file storage_sl.cpp Code handling saving and loading of persistent storages. */
+
+#include "../stdafx.h"
+
+#include "saveload.h"
+#include "compat/storage_sl_compat.h"
+
+#include "../newgrf_storage.h"
+
+#include "../safeguards.h"
+
+/** Description of the data to save and load in #PersistentStorage. */
+static const SaveLoad _storage_desc[] = {
+	SaveLoad::Variable<VarFileType::Label>("grfid", SLE_OBJECT_ADDRESS(PersistentStorage, grfid), SaveLoadVersion::MultipleRoadStops),
+	SaveLoad::Array<VarFileType::U32, 16>("storage", SLE_OBJECT_ADDRESS(PersistentStorage, storage), SaveLoadVersion::PersistentStoragePool, SaveLoadVersion::ExtendPersistentStorage),
+	SaveLoad::Array<VarFileType::U32, 256>("storage", SLE_OBJECT_ADDRESS(PersistentStorage, storage), SaveLoadVersion::ExtendPersistentStorage),
+};
+
+/** Persistent storage data. */
+struct PSACChunkHandler : ChunkHandler {
+	PSACChunkHandler() : ChunkHandler("PSAC", ChunkType::Table) {}
+
+	void Load() const override
+	{
+		const std::vector<SaveLoad> slt = SlCompatTableHeader(_storage_desc, _storage_sl_compat);
+
+		int index;
+
+		while ((index = SlIterateArray()) != -1) {
+			assert(PersistentStorage::CanAllocateItem());
+			PersistentStorage *ps = PersistentStorage::CreateAtIndex(PersistentStorageID(index), GrfID{}, GrfSpecFeature::Invalid, TileIndex{});
+			SlObject(ps, slt);
+		}
+	}
+
+	void Save() const override
+	{
+		SlTableHeader(_storage_desc);
+
+		/* Write the industries */
+		for (PersistentStorage *ps : PersistentStorage::Iterate()) {
+			ps->ClearChanges();
+			SlSetArrayIndex(ps->index);
+			SlObject(ps, _storage_desc);
+		}
+	}
+};
+
+static const PSACChunkHandler PSAC;
+static const ChunkHandlerRef persistent_storage_chunk_handlers[] = {
+	PSAC,
+};
+
+extern const ChunkHandlerTable _persistent_storage_chunk_handlers(persistent_storage_chunk_handlers);

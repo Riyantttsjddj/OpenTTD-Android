@@ -1,0 +1,35 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file survey_osx.cpp OSX implementation of OS-specific survey information. */
+
+#include "../../stdafx.h"
+
+#include "../../3rdparty/fmt/format.h"
+#include "../../survey.h"
+#include "macos.h"
+
+#include <mach-o/arch.h>
+#include <thread>
+
+#include "../../safeguards.h"
+
+void SurveyOS(nlohmann::json &json)
+{
+	auto [ver_major, ver_minor, ver_patch] = GetMacOSVersion();
+
+	const NXArchInfo *arch = NXGetLocalArchInfo();
+
+	json["os"] = "MacOS";
+	json["release"] = fmt::format("{}.{}.{}", ver_major, ver_minor, ver_patch);
+	json["machine"] = arch != nullptr ? arch->description : "unknown";
+	json["min_ver"] = MAC_OS_X_VERSION_MIN_REQUIRED;
+	json["max_ver"] = MAC_OS_X_VERSION_MAX_ALLOWED;
+
+	json["memory"] = SurveyMemoryToText(MacOSGetPhysicalMemory());
+	json["hardware_concurrency"] = std::thread::hardware_concurrency();
+}

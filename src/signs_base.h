@@ -1,0 +1,39 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file signs_base.h Base class for signs. */
+
+#ifndef SIGNS_BASE_H
+#define SIGNS_BASE_H
+
+#include "gfx_type.h"
+#include "signs_type.h"
+#include "viewport_type.h"
+#include "core/pool_type.hpp"
+#include "company_type.h"
+
+typedef Pool<Sign, SignID, 16> SignPool;
+extern SignPool _sign_pool;
+
+struct Sign : SignPool::PoolItem<&_sign_pool> {
+	std::string name{};
+	TrackedViewportSign sign{};
+	int32_t x = 0;
+	int32_t y = 0;
+	int32_t z = 0;
+	Owner owner = INVALID_OWNER; ///< Placed by this company. Anyone can delete them though. OWNER_NONE for gray signs from old games.
+	Colours text_colour = Colours::White; ///< Colour of the sign's text. Only relevant for OWNER_DEITY.
+
+	Sign(SignID index) : SignPool::PoolItem<&_sign_pool>(index) {}
+	Sign(SignID index, Owner owner, int32_t x, int32_t y, int32_t z, const std::string &name) :
+		SignPool::PoolItem<&_sign_pool>(index), name(name), x(x), y(y), z(z), owner(owner) {}
+	~Sign();
+
+	void UpdateVirtCoord();
+};
+
+#endif /* SIGNS_BASE_H */
