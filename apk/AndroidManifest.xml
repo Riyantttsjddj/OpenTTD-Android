@@ -15,7 +15,7 @@
         and the app does not rely on any newer platform behaviour.
     -->
 
-    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="35" />
 
     <!-- Neither of these is needed, but declaring them keeps the app
          installable on devices and TV boxes that lack them. -->

@@ -60,7 +60,7 @@ echo "== linking resources"
     --manifest "$APK/AndroidManifest.xml" \
     --java "$OUT/gen" \
     --min-sdk-version 24 \
-    --target-sdk-version 34 \
+    --target-sdk-version 35 \
     --no-static-lib-packages \
     --no-version-vectors \
     "$OUT/compiled/res.zip"
